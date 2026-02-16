@@ -147,6 +147,20 @@ function App() {
     setFolderPickerSupported(typeof document !== 'undefined' && 'webkitdirectory' in document.createElement('input'))
   }, [])
 
+  useEffect(() => {
+    const prevent = (event: DragEvent) => {
+      event.preventDefault()
+    }
+
+    window.addEventListener('dragover', prevent, { capture: true })
+    window.addEventListener('drop', prevent, { capture: true })
+
+    return () => {
+      window.removeEventListener('dragover', prevent, { capture: true })
+      window.removeEventListener('drop', prevent, { capture: true })
+    }
+  }, [])
+
   const getErrorMessage = (error: unknown) => {
     if (error instanceof RpcError) {
       return `RPC error: ${error.message}`
