@@ -16,6 +16,7 @@ type RpcErrorResponse = {
   error: {
     message: string
     stack?: string
+    code?: 'missing_package' | 'missing_assets' | 'python_runtime'
   }
 }
 
@@ -45,6 +46,7 @@ type PyodideApi = {
     delete: (name: string) => void
   }
   runPythonAsync: (code: string) => Promise<unknown>
+  loadPackage: (packages: string | string[]) => Promise<void>
 }
 
 const PYODIDE_BASE_URL = 'https://cdn.jsdelivr.net/pyodide/v0.27.2/full/'
@@ -183,6 +185,23 @@ type PcSelectExternalPntResult = {
 }
 
 let pyodideReadyPromise: Promise<PyodideApi> | null = null
+let pyodidePackagesReadyPromise: Promise<void> | null = null
+let assetsMountPromise: Promise<AssetsCheckResult> | null = null
+let runtimeInitPromise: Promise<unknown> | null = null
+
+type EngineErrorCode = 'missing_package' | 'missing_assets' | 'python_runtime'
+
+class EngineInitError extends Error {
+  code: EngineErrorCode
+
+  constructor(code: EngineErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message)
+    this.code = code
+    if (options?.cause !== undefined) {
+      ;(this as Error & { cause?: unknown }).cause = options.cause
+    }
+  }
+}
 
 async function initPyodide() {
   if (!pyodideReadyPromise) {
@@ -198,6 +217,88 @@ async function initPyodide() {
   return pyodideReadyPromise
 }
 
+async function ensurePackagesLoaded(pyodide: PyodideApi): Promise<void> {
+  if (!pyodidePackagesReadyPromise) {
+    pyodidePackagesReadyPromise = pyodide
+      .loadPackage(['numpy', 'pillow'])
+      .catch((error) => {
+        pyodidePackagesReadyPromise = null
+        throw new EngineInitError('missing_package', 'Failed to load Pyodide packages: numpy, pillow', { cause: error })
+      })
+  }
+
+  await pyodidePackagesReadyPromise
+}
+
+async function mountAssets(pyodide: PyodideApi): Promise<AssetsCheckResult> {
+  const zipUrl = new URL('../pc_assets.zip', self.location.href).toString()
+  const response = await fetch(zipUrl)
+
+  if (!response.ok) {
+    throw new EngineInitError('missing_assets', `Failed to fetch assets zip: ${response.status} ${response.statusText}`)
+  }
+
+  const zipData = new Uint8Array(await response.arrayBuffer())
+  if (pyodide.FS.analyzePath('/pc_assets.zip').exists) {
+    pyodide.FS.unlink('/pc_assets.zip')
+  }
+
+  pyodide.FS.writeFile('/pc_assets.zip', zipData)
+  pyodide.FS.mkdirTree('/assets')
+
+  await pyodide.runPythonAsync(`
+import zipfile
+
+with zipfile.ZipFile('/pc_assets.zip', 'r') as zf:
+    zf.extractall('/')
+`)
+
+  return getAssetsCheck(pyodide)
+}
+
+async function ensureAssetsMounted(pyodide: PyodideApi): Promise<AssetsCheckResult> {
+  const current = getAssetsCheck(pyodide)
+  if (current.hasTemplates && current.countTemplates > 0 && current.hasTablaDyes) {
+    return current
+  }
+
+  if (!assetsMountPromise) {
+    assetsMountPromise = mountAssets(pyodide).catch((error) => {
+      assetsMountPromise = null
+      throw error
+    })
+  }
+
+  return assetsMountPromise
+}
+
+async function ensureRuntimeReady(pyodide: PyodideApi): Promise<void> {
+  await ensurePackagesLoaded(pyodide)
+  const assets = await ensureAssetsMounted(pyodide)
+
+  if (!assets.hasTemplates || assets.countTemplates === 0 || !assets.hasTablaDyes) {
+    throw new EngineInitError('missing_assets', 'Assets are mounted but incomplete: templates and TablaDyes_v1.json are required')
+  }
+
+  if (!runtimeInitPromise) {
+    runtimeInitPromise = runPythonJson(
+      pyodide,
+      `
+import json, sys
+if '/assets/py_runtime' not in sys.path:
+    sys.path.insert(0, '/assets/py_runtime')
+import pc_web_entry
+json.dumps(pc_web_entry.init(), ensure_ascii=False)
+`
+    ).catch((error) => {
+      runtimeInitPromise = null
+      throw new EngineInitError('python_runtime', 'Failed to initialize pc_web_entry runtime', { cause: error })
+    })
+  }
+
+  await runtimeInitPromise
+}
+
 const handlers: Record<string, RpcHandler> = {
   'engine.ping': async () => {
     const pyodide = await initPyodide()
@@ -209,29 +310,8 @@ const handlers: Record<string, RpcHandler> = {
   },
   'assets.mount': async () => {
     const pyodide = await initPyodide()
+    const checkResult = await ensureAssetsMounted(pyodide)
     const zipUrl = new URL('../pc_assets.zip', self.location.href).toString()
-    const response = await fetch(zipUrl)
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch assets zip: ${response.status} ${response.statusText}`)
-    }
-
-    const zipData = new Uint8Array(await response.arrayBuffer())
-    if (pyodide.FS.analyzePath('/pc_assets.zip').exists) {
-      pyodide.FS.unlink('/pc_assets.zip')
-    }
-
-    pyodide.FS.writeFile('/pc_assets.zip', zipData)
-    pyodide.FS.mkdirTree('/assets')
-
-    await pyodide.runPythonAsync(`
-import zipfile
-
-with zipfile.ZipFile('/pc_assets.zip', 'r') as zf:
-    zf.extractall('/')
-`)
-
-    const checkResult = getAssetsCheck(pyodide)
 
     return {
       mounted: true,
@@ -245,20 +325,22 @@ with zipfile.ZipFile('/pc_assets.zip', 'r') as zf:
   },
   'pc.init': async () => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const result = await runPythonJson(
       pyodide,
       `
 import json, sys
 if '/assets/py_runtime' not in sys.path:
     sys.path.insert(0, '/assets/py_runtime')
-from pc_web_entry import init
-json.dumps(init(), ensure_ascii=False)
+import pc_web_entry
+json.dumps(pc_web_entry.init(), ensure_ascii=False)
 `
     )
     return result
   },
   'pc.listTemplates': async () => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const result = (await runPythonJson(
       pyodide,
       `
@@ -277,6 +359,7 @@ json.dumps(list_templates(), ensure_ascii=False)
   },
   'pc.listDyes': async () => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const result = (await runPythonJson(
       pyodide,
       `
@@ -295,6 +378,7 @@ json.dumps(list_dyes(), ensure_ascii=False)
   },
   'pc.listFrameImages': async () => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const result = (await runPythonJson(
       pyodide,
       `
@@ -314,6 +398,7 @@ json.dumps(list_frame_images(), ensure_ascii=False)
 
   'pc.setTemplate': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const templateId = (params as { templateId?: unknown } | undefined)?.templateId
 
     if (typeof templateId !== 'string' || templateId.trim().length === 0) {
@@ -336,6 +421,7 @@ json.dumps(set_template(${safeTemplateId}), ensure_ascii=False)
   },
   'pc.setImage': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const imageBuffer = asArrayBuffer((params as { imageBytes?: unknown } | undefined)?.imageBytes)
     const maxImageDim = asPositiveInt((params as { maxImageDim?: unknown } | undefined)?.maxImageDim, 4096)
     await assertImageDimensions(imageBuffer, maxImageDim)
@@ -360,6 +446,7 @@ json.dumps(set_image(bytes(__pc_image_bytes)), ensure_ascii=False)
   },
   'pc.setCanvasRequest': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const canvasRequest = asCanvasRequest((params as { canvasRequest?: unknown } | undefined)?.canvasRequest)
     const safeCanvasRequest = JSON.stringify(canvasRequest)
 
@@ -376,6 +463,7 @@ json.dumps(set_canvas_request(${safeCanvasRequest}), ensure_ascii=False)
   },
   'pc.renderPreview': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const mode = asPreviewMode((params as { mode?: unknown } | undefined)?.mode)
     const settings = asDyesSettings((params as { settings?: unknown } | undefined)?.settings)
 
@@ -420,6 +508,7 @@ _pc_preview_bytes
   },
   'pc.generatePnt': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const writerMode = asWriterMode((params as { settings?: { writerMode?: unknown } } | undefined)?.settings?.writerMode)
     const dyesSettings = asDyesSettings((params as { settings?: unknown } | undefined)?.settings)
     const safeSettings = JSON.stringify({ ...dyesSettings, writerMode })
@@ -505,6 +594,7 @@ with zipfile.ZipFile(${JSON.stringify(tempZipPath)}, 'r') as zf:
   },
   'pc.scanExternal': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const root = asOptionalString((params as { root?: unknown } | undefined)?.root) ?? '/userlib'
     const recursive = asBoolean((params as { recursive?: unknown } | undefined)?.recursive, true)
     const detectGuid = asBoolean((params as { detect_guid?: unknown } | undefined)?.detect_guid, true)
@@ -529,6 +619,7 @@ json.dumps(scanExternal(root=${JSON.stringify(root)}, recursive=${recursive ? 'T
   },
   'pc.useExternal': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const selectedPath = (params as { path?: unknown } | undefined)?.path
 
     if (typeof selectedPath !== 'string' || selectedPath.trim().length === 0) {
@@ -549,6 +640,7 @@ json.dumps(useExternal(${safePath}), ensure_ascii=False)
   },
   'pc.mountExternalLibrary': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const zipBuffer = asArrayBuffer((params as { zipBytes?: unknown } | undefined)?.zipBytes)
     const zipBytes = new Uint8Array(zipBuffer)
 
@@ -587,6 +679,7 @@ json.dumps(scanExternal(root='${mountPath}', recursive=True, detect_guid=True, m
   },
   'pc.selectExternalPnt': async (params) => {
     const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
     const selectedPath = (params as { path?: unknown } | undefined)?.path
 
     if (typeof selectedPath !== 'string' || selectedPath.trim().length === 0) {
@@ -989,13 +1082,35 @@ function toSuccessResponse(id: number, result: unknown): RpcSuccessResponseWithT
 }
 
 function toErrorResponse(id: number, error: unknown): RpcErrorResponse {
+  const formatEngineError = (engineError: EngineInitError): RpcErrorResponse => ({
+    id,
+    ok: false,
+    error: {
+      code: engineError.code,
+      message: `[${engineError.code}] ${engineError.message}`,
+      stack: engineError.stack
+    }
+  })
+
+  if (error instanceof EngineInitError) {
+    return formatEngineError(error)
+  }
+
   if (error instanceof Error) {
+    const maybeCode =
+      error.message.includes("No module named 'PIL'") || error.message.includes('Failed to load Pyodide packages')
+        ? 'missing_package'
+        : error.message.includes('/assets') || error.message.includes('pc_assets.zip')
+          ? 'missing_assets'
+          : undefined
+
     return {
       id,
       ok: false,
       error: {
         message: error.message,
-        stack: error.stack
+        stack: error.stack,
+        code: maybeCode
       }
     }
   }
