@@ -69,7 +69,13 @@ function PreviewPane({
             <p>
               {t('web.mode')}: {previewMeta.mode} · quality: {previewMeta.previewQuality} · bytes: {previewMeta.byteLength}
             </p>
-            <img src={previewImageUrl} alt={t('web.preview_render_alt')} style={{ maxWidth: '100%', border: '1px solid #ddd' }} />
+            <img
+              src={previewImageUrl}
+              alt={t('web.preview_render_alt')}
+              draggable={false}
+              onDragStart={(event) => event.preventDefault()}
+              style={{ maxWidth: '100%', border: '1px solid #ddd' }}
+            />
           </section>
         ) : null}
 
