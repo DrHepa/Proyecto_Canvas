@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n/I18nProvider'
 
 export type CanvasRange = {
@@ -46,16 +47,66 @@ function toNumber(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function parseInteger(value: string): number | null {
+  if (value.trim() === '') {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isInteger(parsed) ? parsed : null
+}
+
+function isInRange(value: number, range: CanvasRange): boolean {
+  return value >= range.min && value <= range.max
+}
+
 function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: CanvasLayoutPanelProps) {
   const { t } = useI18n()
+
+  const [rowsText, setRowsText] = useState('')
+  const [colsText, setColsText] = useState('')
+  const [rowsYText, setRowsYText] = useState('')
+  const [blocksXText, setBlocksXText] = useState('')
+
+  const multiCanvasRows =
+    layout?.kind === 'multi_canvas' ? clampToRange(request?.rows ?? layout.rows.default, layout.rows) : null
+  const multiCanvasCols =
+    layout?.kind === 'multi_canvas' ? clampToRange(request?.cols ?? layout.cols.default, layout.cols) : null
+  const dynamicRowsY = layout?.kind === 'dynamic' ? clampToRange(request?.rows_y ?? layout.rows_y.default, layout.rows_y) : null
+  const dynamicBlocksX =
+    layout?.kind === 'dynamic' ? clampToRange(request?.blocks_x ?? layout.blocks_x.default, layout.blocks_x) : null
+
+  useEffect(() => {
+    if (multiCanvasRows !== null) {
+      setRowsText(String(multiCanvasRows))
+    }
+  }, [multiCanvasRows])
+
+  useEffect(() => {
+    if (multiCanvasCols !== null) {
+      setColsText(String(multiCanvasCols))
+    }
+  }, [multiCanvasCols])
+
+  useEffect(() => {
+    if (dynamicRowsY !== null) {
+      setRowsYText(String(dynamicRowsY))
+    }
+  }, [dynamicRowsY])
+
+  useEffect(() => {
+    if (dynamicBlocksX !== null) {
+      setBlocksXText(String(dynamicBlocksX))
+    }
+  }, [dynamicBlocksX])
 
   if (!layout || layout.kind === 'fixed') {
     return null
   }
 
   if (layout.kind === 'multi_canvas') {
-    const rows = clampToRange(request?.rows ?? layout.rows.default, layout.rows)
-    const cols = clampToRange(request?.cols ?? layout.cols.default, layout.cols)
+    const rows = multiCanvasRows ?? layout.rows.default
+    const cols = multiCanvasCols ?? layout.cols.default
 
     return (
       <section>
@@ -69,10 +120,24 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
               min={layout.rows.min}
               max={layout.rows.max}
               step={1}
-              value={rows}
+              value={rowsText}
               onChange={(event) => {
+                const nextText = event.target.value
+                setRowsText(nextText)
+
+                const parsed = parseInteger(nextText)
+                if (parsed !== null && isInRange(parsed, layout.rows)) {
+                  onChange({
+                    rows: parsed,
+                    cols
+                  })
+                }
+              }}
+              onBlur={(event) => {
+                const finalValue = clampToRange(toNumber(event.target.value), layout.rows)
+                setRowsText(String(finalValue))
                 onChange({
-                  rows: clampToRange(toNumber(event.target.value), layout.rows),
+                  rows: finalValue,
                   cols
                 })
               }}
@@ -85,11 +150,25 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
               min={layout.cols.min}
               max={layout.cols.max}
               step={1}
-              value={cols}
+              value={colsText}
               onChange={(event) => {
+                const nextText = event.target.value
+                setColsText(nextText)
+
+                const parsed = parseInteger(nextText)
+                if (parsed !== null && isInRange(parsed, layout.cols)) {
+                  onChange({
+                    rows,
+                    cols: parsed
+                  })
+                }
+              }}
+              onBlur={(event) => {
+                const finalValue = clampToRange(toNumber(event.target.value), layout.cols)
+                setColsText(String(finalValue))
                 onChange({
                   rows,
-                  cols: clampToRange(toNumber(event.target.value), layout.cols)
+                  cols: finalValue
                 })
               }}
             />
@@ -99,8 +178,8 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
     )
   }
 
-  const rowsY = clampToRange(request?.rows_y ?? layout.rows_y.default, layout.rows_y)
-  const blocksX = clampToRange(request?.blocks_x ?? layout.blocks_x.default, layout.blocks_x)
+  const rowsY = dynamicRowsY ?? layout.rows_y.default
+  const blocksX = dynamicBlocksX ?? layout.blocks_x.default
 
   return (
     <section>
@@ -114,10 +193,24 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
             min={layout.rows_y.min}
             max={layout.rows_y.max}
             step={1}
-            value={rowsY}
+            value={rowsYText}
             onChange={(event) => {
+              const nextText = event.target.value
+              setRowsYText(nextText)
+
+              const parsed = parseInteger(nextText)
+              if (parsed !== null && isInRange(parsed, layout.rows_y)) {
+                onChange({
+                  rows_y: parsed,
+                  blocks_x: blocksX
+                })
+              }
+            }}
+            onBlur={(event) => {
+              const finalValue = clampToRange(toNumber(event.target.value), layout.rows_y)
+              setRowsYText(String(finalValue))
               onChange({
-                rows_y: clampToRange(toNumber(event.target.value), layout.rows_y),
+                rows_y: finalValue,
                 blocks_x: blocksX
               })
             }}
@@ -130,11 +223,25 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
             min={layout.blocks_x.min}
             max={layout.blocks_x.max}
             step={1}
-            value={blocksX}
+            value={blocksXText}
             onChange={(event) => {
+              const nextText = event.target.value
+              setBlocksXText(nextText)
+
+              const parsed = parseInteger(nextText)
+              if (parsed !== null && isInRange(parsed, layout.blocks_x)) {
+                onChange({
+                  rows_y: rowsY,
+                  blocks_x: parsed
+                })
+              }
+            }}
+            onBlur={(event) => {
+              const finalValue = clampToRange(toNumber(event.target.value), layout.blocks_x)
+              setBlocksXText(String(finalValue))
               onChange({
                 rows_y: rowsY,
-                blocks_x: clampToRange(toNumber(event.target.value), layout.blocks_x)
+                blocks_x: finalValue
               })
             }}
           />
