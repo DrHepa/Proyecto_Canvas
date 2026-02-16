@@ -1,0 +1,8 @@
+# Proyecto Canvas (Preview) - runtime dependencies
+# Install:  pip install -r requirements.txt
+
+Pillow>=9.0
+numpy>=1.22
+
+# Optional (speeds up some dithering paths if available):
+# numba>=0.57

@@ -1,0 +1,23 @@
+Proyecto Canvas — notas para empaquetar
+
+Entrypoint
+- Ejecuta:  python run_gui_flatdark_pro.py
+- (Cuando empaquetes a .exe) usa run_gui_flatdark_pro.py como script de arranque.
+
+Dependencias
+- Ver requirements.txt (Pillow + numpy). Numba es opcional.
+
+Settings
+- settings.json debe ir junto a run_gui_flatdark_pro.py (o junto al .exe).
+- Si la carpeta no es escribible, la app usa:
+  - Windows: %APPDATA%\ProyectoCanvas\settings.json
+  - Linux/macOS: ~/.proyecto_canvas/settings.json
+
+Limpieza ya aplicada en este paquete
+- Eliminado: .git/, __pycache__/ y *.pyc
+- Eliminado: user_cache.json (paths locales del dev)
+- Eliminado: desktop.ini
+
+Recomendación para releases
+- NO distribuyas carpetas de cache/estado del usuario.
+- Mantén Templates/ y locales/ dentro del bundle (son parte funcional).
