@@ -165,6 +165,11 @@ type UserlibIngestSummary = {
   skippedCount: number
 }
 
+
+function resolveAssetsZipUrl(): string {
+  return new URL('/pc_assets.zip', self.location.origin).toString()
+}
+
 type PcSelectExternalPntResult = {
   ok: boolean
   selected_external_pnt_path: string
@@ -219,6 +224,7 @@ async function initPyodide() {
 
 async function ensurePackagesLoaded(pyodide: PyodideApi): Promise<void> {
   if (!pyodidePackagesReadyPromise) {
+    console.info('[py-worker] Loading Pyodide packages: numpy, pillow')
     pyodidePackagesReadyPromise = pyodide
       .loadPackage(['numpy', 'pillow'])
       .catch((error) => {
@@ -231,7 +237,7 @@ async function ensurePackagesLoaded(pyodide: PyodideApi): Promise<void> {
 }
 
 async function mountAssets(pyodide: PyodideApi): Promise<AssetsCheckResult> {
-  const zipUrl = new URL('../pc_assets.zip', self.location.href).toString()
+  const zipUrl = resolveAssetsZipUrl()
   const response = await fetch(zipUrl)
 
   if (!response.ok) {
@@ -272,7 +278,7 @@ async function ensureAssetsMounted(pyodide: PyodideApi): Promise<AssetsCheckResu
   return assetsMountPromise
 }
 
-async function ensureRuntimeReady(pyodide: PyodideApi): Promise<void> {
+async function ensureRuntimeReady(pyodide: PyodideApi): Promise<unknown> {
   await ensurePackagesLoaded(pyodide)
   const assets = await ensureAssetsMounted(pyodide)
 
@@ -281,6 +287,7 @@ async function ensureRuntimeReady(pyodide: PyodideApi): Promise<void> {
   }
 
   if (!runtimeInitPromise) {
+    console.info('[py-worker] Importing pc_web_entry and running init()')
     runtimeInitPromise = runPythonJson(
       pyodide,
       `
@@ -292,11 +299,11 @@ json.dumps(pc_web_entry.init(), ensure_ascii=False)
 `
     ).catch((error) => {
       runtimeInitPromise = null
-      throw new EngineInitError('python_runtime', 'Failed to initialize pc_web_entry runtime', { cause: error })
+      throw new EngineInitError('python_runtime', `Failed to initialize pc_web_entry runtime: ${String(error)}`, { cause: error })
     })
   }
 
-  await runtimeInitPromise
+  return runtimeInitPromise
 }
 
 const handlers: Record<string, RpcHandler> = {
@@ -311,7 +318,7 @@ const handlers: Record<string, RpcHandler> = {
   'assets.mount': async () => {
     const pyodide = await initPyodide()
     const checkResult = await ensureAssetsMounted(pyodide)
-    const zipUrl = new URL('../pc_assets.zip', self.location.href).toString()
+    const zipUrl = resolveAssetsZipUrl()
 
     return {
       mounted: true,
@@ -325,18 +332,7 @@ const handlers: Record<string, RpcHandler> = {
   },
   'pc.init': async () => {
     const pyodide = await initPyodide()
-    await ensureRuntimeReady(pyodide)
-    const result = await runPythonJson(
-      pyodide,
-      `
-import json, sys
-if '/assets/py_runtime' not in sys.path:
-    sys.path.insert(0, '/assets/py_runtime')
-import pc_web_entry
-json.dumps(pc_web_entry.init(), ensure_ascii=False)
-`
-    )
-    return result
+    return ensureRuntimeReady(pyodide)
   },
   'pc.listTemplates': async () => {
     const pyodide = await initPyodide()
@@ -457,7 +453,8 @@ import json, sys
 if '/assets/py_runtime' not in sys.path:
     sys.path.insert(0, '/assets/py_runtime')
 from pc_web_entry import set_canvas_request
-json.dumps(set_canvas_request(${safeCanvasRequest}), ensure_ascii=False)
+_pc_canvas_request = json.loads(${JSON.stringify(safeCanvasRequest)})
+json.dumps(set_canvas_request(_pc_canvas_request), ensure_ascii=False)
 `
     )
   },
@@ -477,11 +474,12 @@ json.dumps(set_canvas_request(${safeCanvasRequest}), ensure_ascii=False)
     const pngBytes = await runPythonBytes(
       pyodide,
       `
-import sys
+import json, sys
 if '/assets/py_runtime' not in sys.path:
     sys.path.insert(0, '/assets/py_runtime')
 from pc_web_entry import render_preview
-_pc_preview_bytes = render_preview(mode=${safeMode}, settings=${safeSettings})
+_pc_settings = json.loads(${JSON.stringify(safeSettings)})
+_pc_preview_bytes = render_preview(mode=${safeMode}, settings=_pc_settings)
 if ${requestedMaxDim} > 0:
     from io import BytesIO
     from PIL import Image
@@ -516,11 +514,12 @@ _pc_preview_bytes
     const pntBytes = await runPythonBytes(
       pyodide,
       `
-import sys
+import json, sys
 if '/assets/py_runtime' not in sys.path:
     sys.path.insert(0, '/assets/py_runtime')
 from pc_web_entry import generate_pnt
-generate_pnt(settings=${safeSettings})
+_pc_settings = json.loads(${JSON.stringify(safeSettings)})
+generate_pnt(settings=_pc_settings)
 `
     )
 
@@ -805,6 +804,30 @@ async function runPythonBytes(pyodide: PyodideApi, script: string): Promise<Uint
 
   if (raw instanceof ArrayBuffer) {
     return new Uint8Array(raw)
+  }
+
+  if (ArrayBuffer.isView(raw)) {
+    return new Uint8Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength))
+  }
+
+  if (raw && typeof raw === 'object') {
+    const proxy = raw as { toJs?: (options?: { create_proxies?: boolean }) => unknown; destroy?: () => void }
+    if (typeof proxy.toJs === 'function') {
+      const converted = proxy.toJs({ create_proxies: false })
+      if (typeof proxy.destroy === 'function') {
+        proxy.destroy()
+      }
+
+      if (converted instanceof Uint8Array) {
+        return converted
+      }
+      if (converted instanceof ArrayBuffer) {
+        return new Uint8Array(converted)
+      }
+      if (ArrayBuffer.isView(converted)) {
+        return new Uint8Array(converted.buffer.slice(converted.byteOffset, converted.byteOffset + converted.byteLength))
+      }
+    }
   }
 
   throw new Error('Python script did not return PNG bytes')
