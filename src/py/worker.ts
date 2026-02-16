@@ -165,9 +165,14 @@ type UserlibIngestSummary = {
   skippedCount: number
 }
 
+type AssetsMountParams = {
+  zipUrl?: string
+}
 
-function resolveAssetsZipUrl(): string {
-  return new URL('/pc_assets.zip', self.location.origin).toString()
+type AssetsMountResult = AssetsCheckResult & {
+  mounted: true
+  zipUrl: string
+  triedUrls: string[]
 }
 
 type PcSelectExternalPntResult = {
@@ -191,7 +196,7 @@ type PcSelectExternalPntResult = {
 
 let pyodideReadyPromise: Promise<PyodideApi> | null = null
 let pyodidePackagesReadyPromise: Promise<void> | null = null
-let assetsMountPromise: Promise<AssetsCheckResult> | null = null
+let assetsMountPromise: Promise<AssetsMountResult> | null = null
 let runtimeInitPromise: Promise<unknown> | null = null
 
 type EngineErrorCode = 'missing_package' | 'missing_assets' | 'python_runtime'
@@ -236,12 +241,35 @@ async function ensurePackagesLoaded(pyodide: PyodideApi): Promise<void> {
   await pyodidePackagesReadyPromise
 }
 
-async function mountAssets(pyodide: PyodideApi): Promise<AssetsCheckResult> {
-  const zipUrl = resolveAssetsZipUrl()
-  const response = await fetch(zipUrl)
+async function mountAssets(pyodide: PyodideApi, params?: AssetsMountParams): Promise<AssetsMountResult> {
+  const triedUrls: string[] = []
+  const candidateUrls = [
+    params?.zipUrl,
+    new URL('../pc_assets.zip', self.location.href).toString(),
+    new URL('pc_assets.zip', self.location.href).toString()
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0)
 
-  if (!response.ok) {
-    throw new EngineInitError('missing_assets', `Failed to fetch assets zip: ${response.status} ${response.statusText}`)
+  const deduplicatedUrls = [...new Set(candidateUrls)]
+  let response: Response | null = null
+  let zipUrlUsed: string | null = null
+
+  for (const url of deduplicatedUrls) {
+    triedUrls.push(url)
+
+    try {
+      const fetched = await fetch(url, { cache: 'no-store' })
+      if (fetched.ok) {
+        response = fetched
+        zipUrlUsed = url
+        break
+      }
+    } catch {
+      // Ignore and continue to fallback URLs.
+    }
+  }
+
+  if (!response || !zipUrlUsed) {
+    throw new EngineInitError('missing_assets', `Failed to fetch assets zip (tried ${triedUrls.length} urls): ${triedUrls.join(' | ')}`)
   }
 
   const zipData = new Uint8Array(await response.arrayBuffer())
@@ -259,17 +287,27 @@ with zipfile.ZipFile('/pc_assets.zip', 'r') as zf:
     zf.extractall('/')
 `)
 
-  return getAssetsCheck(pyodide)
+  return {
+    mounted: true,
+    zipUrl: zipUrlUsed,
+    triedUrls,
+    ...getAssetsCheck(pyodide)
+  }
 }
 
-async function ensureAssetsMounted(pyodide: PyodideApi): Promise<AssetsCheckResult> {
+async function ensureAssetsMounted(pyodide: PyodideApi, params?: AssetsMountParams): Promise<AssetsMountResult> {
   const current = getAssetsCheck(pyodide)
   if (current.hasTemplates && current.countTemplates > 0 && current.hasTablaDyes) {
-    return current
+    return {
+      mounted: true,
+      zipUrl: 'already-mounted',
+      triedUrls: [],
+      ...current
+    }
   }
 
   if (!assetsMountPromise) {
-    assetsMountPromise = mountAssets(pyodide).catch((error) => {
+    assetsMountPromise = mountAssets(pyodide, params).catch((error) => {
       assetsMountPromise = null
       throw error
     })
@@ -315,16 +353,10 @@ const handlers: Record<string, RpcHandler> = {
       ready: true
     }
   },
-  'assets.mount': async () => {
+  'assets.mount': async (params) => {
     const pyodide = await initPyodide()
-    const checkResult = await ensureAssetsMounted(pyodide)
-    const zipUrl = resolveAssetsZipUrl()
-
-    return {
-      mounted: true,
-      zipUrl,
-      ...checkResult
-    }
+    const mountParams = ((params ?? {}) as AssetsMountParams)
+    return ensureAssetsMounted(pyodide, mountParams)
   },
   'assets.check': async () => {
     const pyodide = await initPyodide()

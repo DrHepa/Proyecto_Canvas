@@ -37,10 +37,15 @@ type RpcMethodMap = {
     }
   }
   'assets.mount': {
-    params: undefined
+    params:
+      | undefined
+      | {
+          zipUrl?: string
+        }
     result: {
       mounted: boolean
       zipUrl: string
+      triedUrls: string[]
       hasTemplates: boolean
       hasTablaDyes: boolean
       hasLocales: boolean
