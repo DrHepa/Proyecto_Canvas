@@ -5,6 +5,11 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 EXCLUDED_DIRS = {".git", "node_modules", "dist", "__pycache__"}
+EXCLUDED_ROOT_PY_FILES = {
+    "run_gui_flatdark_pro.py",
+    "tools_export_user_mask_pack.py",
+    "tools_extract_mask_from_pnt.py",
+}
 ZIP_NAME = "pc_assets.zip"
 ZIP_ROOT = Path("assets")
 
@@ -41,6 +46,17 @@ def add_dir(zipf: ZipFile, source_dir: Path, dest_root: Path) -> int:
     return file_count
 
 
+
+
+def add_root_runtime_modules(zipf: ZipFile, repo_root: Path, dest_root: Path) -> int:
+    file_count = 0
+    for file_path in sorted(repo_root.glob("*.py")):
+        if file_path.name in EXCLUDED_ROOT_PY_FILES:
+            continue
+        zipf.write(file_path, (dest_root / file_path.name).as_posix())
+        file_count += 1
+    return file_count
+
 def format_size(num_bytes: int) -> str:
     size = float(num_bytes)
     units = ["B", "KB", "MB", "GB"]
@@ -76,6 +92,7 @@ def main() -> None:
         file_count += add_dir(zipf, locales_dir, ZIP_ROOT / "locales")
         # Bundle complete Python runtime wrapper and core modules under /assets/py_runtime/**
         file_count += add_dir(zipf, py_runtime_dir, ZIP_ROOT / "py_runtime")
+        file_count += add_root_runtime_modules(zipf, repo_root, ZIP_ROOT / "py_runtime")
 
     final_size = zip_path.stat().st_size
     print(f"Generated: {zip_path.relative_to(repo_root)}")

@@ -6,9 +6,10 @@ import sys
 from collections import Counter
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PIL import Image
+if TYPE_CHECKING:
+    from PIL import Image
 
 
 _ASSETS_ROOT = Path('/assets')
@@ -308,6 +309,8 @@ def _rgb_tuple_from_linear(linear_rgb: Any) -> tuple[int, int, int] | None:
 
 
 def _fallback_best_colors(controller: PreviewController, limit: int) -> list[int]:
+    from PIL import Image
+
     if limit <= 0:
         return []
 
@@ -375,6 +378,8 @@ def _resolve_ranked_dyes(controller: PreviewController, best_colors: int) -> lis
 
 
 def _apply_color_settings(controller: PreviewController, settings: dict[str, Any] | None = None) -> None:
+    from PIL import Image
+
     settings_obj = settings if isinstance(settings, dict) else {}
     state = getattr(controller, 'state', None)
     if state is None:
@@ -469,7 +474,9 @@ def _normalize_border_config(raw: Any) -> dict[str, Any]:
         'frame_image': frame_image,
     }
 
-def _compose_preview_overlay_if_needed(*, controller: PreviewController, preview: Image.Image, mode: str) -> Image.Image:
+def _compose_preview_overlay_if_needed(*, controller: PreviewController, preview: 'Image.Image', mode: str) -> 'Image.Image':
+    from PIL import Image
+
     """Compose template overlay in web runtime for ARK simulation previews."""
     if mode != 'ark_simulation':
         return preview
@@ -632,6 +639,8 @@ def list_templates() -> list[dict[str, Any]]:
 
 
 def set_image(image_bytes: bytes) -> dict[str, Any]:
+    from PIL import Image
+
     global _last_image_size
 
     controller = _get_controller()
@@ -818,6 +827,8 @@ def set_canvas_request(canvas_request: dict[str, Any] | None = None) -> dict[str
 
 
 def render_preview(mode: str = 'visual', settings: dict[str, Any] | None = None) -> bytes:
+    from PIL import Image
+
     controller = _get_controller()
     preview_mode = str(mode or 'visual').strip().lower()
     if preview_mode not in {'visual', 'ark_simulation'}:
