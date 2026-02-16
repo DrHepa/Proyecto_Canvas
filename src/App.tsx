@@ -192,7 +192,8 @@ function App() {
 
       try {
         await client.ping({ timeoutMs: 60_000 })
-        await client.call('assets.mount', undefined, { timeoutMs: 120_000 })
+        const zipUrl = new URL('pc_assets.zip', document.baseURI).toString()
+        await client.call('assets.mount', { zipUrl }, { timeoutMs: 120_000 })
         await client.call('pc.init', { maxImageDim, previewMaxDim }, { timeoutMs: 60_000 })
 
         const templatesResponse: PcListTemplatesResult = await client.call('pc.listTemplates', undefined, {
