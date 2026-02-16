@@ -678,7 +678,7 @@ function App() {
                 }}
               />
 
-              <fieldset disabled={loading}>
+              <fieldset className="previewModeFieldset" disabled={loading}>
                 <legend>{t('panel.preview_mode')}</legend>
                 <label>
                   <input
