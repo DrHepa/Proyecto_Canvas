@@ -390,7 +390,7 @@ def _apply_color_settings(controller: PreviewController, settings: dict[str, Any
 
     enabled_dyes = _to_int_set(settings_obj.get('enabledDyes'))
     if use_all_dyes:
-        setattr(state, 'enabled_dyes', set())
+        setattr(state, 'enabled_dyes', None)
     else:
         setattr(state, 'enabled_dyes', enabled_dyes)
 
@@ -563,11 +563,11 @@ def _category_from_source_path(source_relpath: str | None) -> str:
     if not source_relpath:
         return 'other'
     source_normalized = source_relpath.lower().replace('\\', '/')
-    if 'templatedescriptors_dinos' in source_normalized:
+    if any(token in source_normalized for token in ('templatedescriptors_dinos', '/dinos/', 'dinos/')):
         return 'dinos'
-    if 'templatedescriptors_humans' in source_normalized:
+    if any(token in source_normalized for token in ('templatedescriptors_humans', '/humans/', 'humans/')):
         return 'humans'
-    if 'templatedescriptors_structures' in source_normalized:
+    if any(token in source_normalized for token in ('templatedescriptors_structures', '/structures/', 'structures/')):
         return 'structures'
     return 'other'
 
@@ -582,15 +582,25 @@ def _family_from_source_path(source_relpath: str | None, category: str) -> str |
     return None
 
 
-def _derive_template_category(template_id: str, descriptor: dict[str, Any], identity: dict[str, Any]) -> str:
+def _derive_template_category(
+    template_id: str,
+    descriptor: dict[str, Any],
+    identity: dict[str, Any],
+    source_relpath: str | None = None,
+) -> str:
     identity_category = identity.get('category')
     normalized = _normalize_template_category(identity_category)
     if normalized != 'other':
         return normalized
 
+    source_category = _category_from_source_path(source_relpath)
+    if source_category != 'other':
+        return source_category
+
     path_hint = '/'.join(
         str(part or '').lower()
         for part in (
+            source_relpath,
             descriptor.get('__source_relpath'),
             descriptor.get('__source_path'),
             descriptor.get('__kind'),
@@ -598,11 +608,11 @@ def _derive_template_category(template_id: str, descriptor: dict[str, Any], iden
         )
     )
 
-    if any(token in path_hint for token in ('structures/', '/structures', 'structure_')):
+    if any(token in path_hint for token in ('templatedescriptors_structures', 'structures/', '/structures', 'structure_')):
         return 'structures'
-    if any(token in path_hint for token in ('template_descriptors_dinos', 'dinos/', '/dinos', 'dino_')):
+    if any(token in path_hint for token in ('templatedescriptors_dinos', 'template_descriptors_dinos', 'dinos/', '/dinos', 'dino_')):
         return 'dinos'
-    if any(token in path_hint for token in ('template_descriptors_humans', 'humans/', '/humans', 'human_', 'playerpawn')):
+    if any(token in path_hint for token in ('templatedescriptors_humans', 'template_descriptors_humans', 'humans/', '/humans', 'human_', 'playerpawn')):
         return 'humans'
 
     template_id_lower = template_id.lower()
@@ -650,7 +660,7 @@ def list_templates() -> list[dict[str, Any]]:
             except Exception:
                 source_relpath = str(template_path)
 
-        category = _category_from_source_path(source_relpath)
+        category = _derive_template_category(template_id, descriptor, identity, source_relpath)
         family = _family_from_source_path(source_relpath, category)
 
         output.append(
