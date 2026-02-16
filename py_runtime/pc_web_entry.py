@@ -559,6 +559,29 @@ def _normalize_template_category(raw: Any) -> str:
     return 'other'
 
 
+def _category_from_source_path(source_relpath: str | None) -> str:
+    if not source_relpath:
+        return 'other'
+    source_normalized = source_relpath.lower().replace('\\', '/')
+    if 'templatedescriptors_dinos' in source_normalized:
+        return 'dinos'
+    if 'templatedescriptors_humans' in source_normalized:
+        return 'humans'
+    if 'templatedescriptors_structures' in source_normalized:
+        return 'structures'
+    return 'other'
+
+
+def _family_from_source_path(source_relpath: str | None, category: str) -> str | None:
+    if not source_relpath:
+        return None
+
+    path_parts = source_relpath.replace('\\', '/').split('/')
+    if len(path_parts) >= 3 and category == 'structures':
+        return path_parts[1] or None
+    return None
+
+
 def _derive_template_category(template_id: str, descriptor: dict[str, Any], identity: dict[str, Any]) -> str:
     identity_category = identity.get('category')
     normalized = _normalize_template_category(identity_category)
@@ -619,6 +642,16 @@ def list_templates() -> list[dict[str, Any]]:
         identity = descriptor.get('identity') or {}
         layout = descriptor.get('layout') or {}
         raster = layout.get('raster') or {}
+        template_path = loader._index.get(template_id)
+        source_relpath = None
+        if template_path is not None:
+            try:
+                source_relpath = template_path.relative_to(_TEMPLATES_ROOT).as_posix()
+            except Exception:
+                source_relpath = str(template_path)
+
+        category = _category_from_source_path(source_relpath)
+        family = _family_from_source_path(source_relpath, category)
 
         output.append(
             {
@@ -628,13 +661,22 @@ def list_templates() -> list[dict[str, Any]]:
                 'h': int(raster.get('height') or 0),
                 'width': int(raster.get('width') or 0),
                 'height': int(raster.get('height') or 0),
-                'category': _derive_template_category(template_id, descriptor, identity),
-                'family': _derive_template_family(template_id, descriptor, identity),
+                'category': category,
+                'family': family,
+                'source_relpath': source_relpath,
                 'kind': identity.get('type') or identity.get('category') or 'unknown',
             }
         )
 
-    output.sort(key=lambda item: str(item.get('label', '')).lower())
+    category_order = {'structures': 0, 'dinos': 1, 'humans': 2, 'other': 3}
+
+    def sort_key(item: dict[str, Any]) -> tuple:
+        category = str(item.get('category') or 'other')
+        family = str(item.get('family') or '')
+        label = str(item.get('label') or item.get('id') or '').lower()
+        return (category_order.get(category, 99), family.lower(), label)
+
+    output.sort(key=sort_key)
     return output
 
 
