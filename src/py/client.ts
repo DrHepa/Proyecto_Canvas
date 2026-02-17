@@ -419,16 +419,37 @@ export class LatestCallCancelledError extends Error {
 }
 
 export class PyWorkerClient {
-  private worker: Worker
+  private worker: Worker | null
   private nextId = 1
   private pending = new Map<number, PendingCall>()
   private latestCallCounters = new Map<string, number>()
   private latestCallControllers = new Map<string, AbortController>()
+  private workerStartupError: Error | null = null
 
-  constructor(worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })) {
-    this.worker = worker
-    this.worker.addEventListener('message', this.handleMessage)
-    this.worker.addEventListener('error', this.handleWorkerError)
+  constructor(worker?: Worker) {
+    this.worker = null
+
+    try {
+      this.worker = worker ?? new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+      this.worker.addEventListener('message', this.handleMessage)
+      this.worker.addEventListener('error', this.handleWorkerError)
+    } catch (error) {
+      this.workerStartupError = error instanceof Error
+        ? error
+        : new Error(`Failed to initialize web worker: ${String(error)}`)
+    }
+  }
+
+  private ensureWorkerReady() {
+    if (this.worker) {
+      return this.worker
+    }
+
+    if (this.workerStartupError) {
+      throw this.workerStartupError
+    }
+
+    throw new Error('PyWorkerClient is not initialized')
   }
 
   ping(options?: { timeoutMs?: number; signal?: AbortSignal }) {
@@ -476,7 +497,8 @@ export class PyWorkerClient {
       const autoTransfers = collectTransferables(params)
       const transferList = dedupeTransferables([...autoTransfers, ...transfer])
 
-      this.worker.postMessage({ id, method, params } satisfies RpcRequest, transferList)
+      const activeWorker = this.ensureWorkerReady()
+      activeWorker.postMessage({ id, method, params } satisfies RpcRequest, transferList)
     })
   }
 
@@ -535,9 +557,11 @@ export class PyWorkerClient {
       this.pending.delete(id)
     }
 
-    this.worker.removeEventListener('message', this.handleMessage)
-    this.worker.removeEventListener('error', this.handleWorkerError)
-    this.worker.terminate()
+    if (this.worker) {
+      this.worker.removeEventListener('message', this.handleMessage)
+      this.worker.removeEventListener('error', this.handleWorkerError)
+      this.worker.terminate()
+    }
   }
 
   private handleMessage = (event: MessageEvent<RpcResponse>) => {
