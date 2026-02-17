@@ -1,0 +1,18 @@
+PC-PATCH-WEB-PREVIEW-REWIRE-P4-HOTFIX2
+
+Fixes preview “disconnected” after Paso 4 by making the Python runtime tolerant to
+camelCase + snake_case keys.
+
+Includes two application methods:
+A) Recommended (robust): run the included python script from repo root:
+   python apply_pc_hotfix2.py
+B) If it applies cleanly: git apply PC-PATCH-WEB-PREVIEW-REWIRE-P4-HOTFIX2.patch
+
+What it fixes:
+- apply_settings(): accepts bestColors/best_colors, ditheringConfig/dithering_config,
+  borderConfig/border_config, canvasRequest/canvas_request, showGameObject/show_game_object.
+- _normalize_border_config(): accepts frameImage in addition to frame_image.
+- render_preview2(): ensures settings_delta is applied and accepts settingsDelta.
+
+Important:
+- DO NOT commit public/pc_assets.zip.
