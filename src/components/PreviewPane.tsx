@@ -63,20 +63,31 @@ function PreviewPane({
 
         {isRenderingPreview ? <p>{t('web.status_rendering_preview')}…</p> : null}
 
-        {previewMeta && previewImageUrl ? (
+        {previewImageUrl || isRenderingPreview ? (
           <section>
             <h2>{t('web.preview_png')}</h2>
-            <p>
-              {t('web.mode')}: {previewMeta.mode} · quality: {previewMeta.previewQuality} · bytes: {previewMeta.byteLength}
-            </p>
-            <img
-              className="preview-pane__image"
-              src={previewImageUrl}
-              alt={t('web.preview_render_alt')}
-              draggable={false}
-              onDragStart={(e) => e.preventDefault()}
-              style={{ maxWidth: '100%', border: '1px solid #ddd' }}
-            />
+            {previewMeta ? (
+              <p>
+                {t('web.mode')}: {previewMeta.mode} · quality: {previewMeta.previewQuality} · bytes: {previewMeta.byteLength}
+              </p>
+            ) : null}
+            <div className="previewWrap">
+              {previewImageUrl ? (
+                <img
+                  className="preview-pane__image"
+                  src={previewImageUrl}
+                  alt={t('web.preview_render_alt')}
+                  draggable={false}
+                  onDragStart={(e) => e.preventDefault()}
+                  style={{ maxWidth: '100%', border: '1px solid #ddd' }}
+                />
+              ) : null}
+              {isRenderingPreview ? (
+                <div className="previewOverlay" aria-hidden="true">
+                  <div className="spinner" />
+                </div>
+              ) : null}
+            </div>
           </section>
         ) : null}
 

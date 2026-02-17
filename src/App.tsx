@@ -82,6 +82,23 @@ type EngineBootstrapState = 'loading' | 'ready' | 'error'
 
 const DEFAULT_MAX_IMAGE_DIM = 4096
 const DEFAULT_PREVIEW_MAX_DIM = 1024
+const PREVIEW_CACHE_LIMIT = 30
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nested]) => `${JSON.stringify(key)}:${stableStringify(nested)}`)
+
+  return `{${entries.join(',')}}`
+}
 
 function parsePositiveInt(value: string, fallback: number): number {
   const parsed = Number(value)
@@ -133,16 +150,28 @@ function App() {
   const [externalEntries, setExternalEntries] = useState<ExternalPntEntry[]>([])
   const [selectedExternalPath, setSelectedExternalPath] = useState<string | null>(null)
   const [folderPickerSupported, setFolderPickerSupported] = useState(false)
+  const previewCacheRef = useRef<Map<string, string>>(new Map())
+  const currentBlobUrlRef = useRef<string | null>(null)
 
   useEffect(() => () => client.dispose(), [client])
 
   useEffect(() => {
     return () => {
-      if (previewImageUrl) {
-        URL.revokeObjectURL(previewImageUrl)
+      const revoked = new Set<string>()
+
+      for (const url of previewCacheRef.current.values()) {
+        if (revoked.has(url)) {
+          continue
+        }
+        URL.revokeObjectURL(url)
+        revoked.add(url)
+      }
+
+      if (currentBlobUrlRef.current && !revoked.has(currentBlobUrlRef.current)) {
+        URL.revokeObjectURL(currentBlobUrlRef.current)
       }
     }
-  }, [previewImageUrl])
+  }, [])
 
   useEffect(() => {
     setFolderPickerSupported(typeof document !== 'undefined' && 'webkitdirectory' in document.createElement('input'))
@@ -442,13 +471,64 @@ function App() {
 
   const previewGenerationRef = useRef(0)
 
-  const handleRenderPreview = async (quality: 'fast' | 'final', generation: number) => {
+  const cachePreviewUrl = (previewKey: string, url: string) => {
+    const cache = previewCacheRef.current
+
+    if (cache.has(previewKey)) {
+      cache.delete(previewKey)
+    }
+
+    cache.set(previewKey, url)
+
+    while (cache.size > PREVIEW_CACHE_LIMIT) {
+      const oldestEntry = cache.entries().next().value as [string, string] | undefined
+      if (!oldestEntry) {
+        break
+      }
+
+      const [, oldestUrl] = oldestEntry
+      cache.delete(oldestEntry[0])
+
+      if (oldestUrl !== currentBlobUrlRef.current && !Array.from(cache.values()).includes(oldestUrl)) {
+        URL.revokeObjectURL(oldestUrl)
+      }
+    }
+  }
+
+  const getCachedPreviewUrl = (previewKey: string) => {
+    const cache = previewCacheRef.current
+    const cached = cache.get(previewKey)
+
+    if (!cached) {
+      return null
+    }
+
+    cache.delete(previewKey)
+    cache.set(previewKey, cached)
+    return cached
+  }
+
+  const handleRenderPreview = async (quality: 'fast' | 'final', generation: number, previewKey: string) => {
     if (!state.selected_template_id || !state.image_meta) {
+      return
+    }
+
+    const cacheKey = `${previewKey}::${quality}`
+    const cached = getCachedPreviewUrl(cacheKey)
+    if (cached) {
+      if (generation !== previewGenerationRef.current) {
+        return
+      }
+
+      currentBlobUrlRef.current = cached
+      setPreviewImageUrl(cached)
+      setIsRenderingPreview(false)
       return
     }
 
     const startedAt = performance.now()
     setIsRenderingPreview(true)
+    setResult('')
 
     try {
       await syncPcSettings(quality)
@@ -466,12 +546,16 @@ function App() {
       const pngBlob = new Blob([response.pngBytes], { type: 'image/png' })
       const nextPreviewUrl = URL.createObjectURL(pngBlob)
 
-      setPreviewImageUrl((current) => {
-        if (current) {
-          URL.revokeObjectURL(current)
-        }
-        return nextPreviewUrl
-      })
+      cachePreviewUrl(cacheKey, nextPreviewUrl)
+
+      const previousUrl = currentBlobUrlRef.current
+      currentBlobUrlRef.current = nextPreviewUrl
+
+      if (previousUrl && previousUrl !== nextPreviewUrl && !Array.from(previewCacheRef.current.values()).includes(previousUrl)) {
+        URL.revokeObjectURL(previousUrl)
+      }
+
+      setPreviewImageUrl(nextPreviewUrl)
       setPreviewMeta(response)
       setLastOpTimeMs(performance.now() - startedAt)
       setResult(`previewMode=${response.mode}, pngBytes=${response.byteLength}`)
@@ -481,7 +565,9 @@ function App() {
       }
       handleRpcError(error)
     } finally {
-      setIsRenderingPreview(false)
+      if (generation === previewGenerationRef.current) {
+        setIsRenderingPreview(false)
+      }
     }
   }
 
@@ -609,15 +695,17 @@ function App() {
 
   const previewDepsHash = useMemo(() => {
     const enabledDyes = [...state.enabled_dyes].sort((a, b) => a - b)
-    return JSON.stringify({
+    return stableStringify({
       templateId: state.selected_template_id,
-      imageVersion,
+      imageToken: imageVersion,
       previewMode: state.preview_mode,
       showGameObject: state.show_game_object,
-      enabledDyes,
-      useAllDyes,
-      bestColors,
-      dithering: {
+      dyes: {
+        useAllDyes,
+        enabledDyes,
+        bestColors
+      },
+      dither: {
         mode: state.dithering_config.mode,
         strength: state.dithering_config.strength
       },
@@ -654,13 +742,14 @@ function App() {
 
     previewGenerationRef.current += 1
     const generation = previewGenerationRef.current
+    const previewKey = previewDepsHash
 
     const fastTimerId = window.setTimeout(() => {
-      void handleRenderPreview('fast', generation)
+      void handleRenderPreview('fast', generation, previewKey)
     }, 100)
 
     const finalTimerId = window.setTimeout(() => {
-      void handleRenderPreview('final', generation)
+      void handleRenderPreview('final', generation, previewKey)
     }, 800)
 
     return () => {
