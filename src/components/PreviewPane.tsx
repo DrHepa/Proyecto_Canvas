@@ -125,8 +125,8 @@ function PreviewPane({
   return (
     <section className="preview-pane">
       <div className="panel-card">
-        {busyTask ? <p>busy: {busyTask}</p> : null}
-        {lastOpTimeMs !== null ? <p>last operation: {lastOpTimeMs.toFixed(1)} ms</p> : null}
+        {busyTask ? <p>{t('web.busy_task')}: {busyTask}</p> : null}
+        {lastOpTimeMs !== null ? <p>{t('web.last_operation')}: {lastOpTimeMs.toFixed(1)} ms</p> : null}
         {result ? <p>{t('web.result')}: {result}</p> : null}
 
         {warnings.length > 0 ? (
@@ -150,7 +150,7 @@ function PreviewPane({
             <h2>{t('web.preview_png')}</h2>
             {previewMeta ? (
               <p>
-                {t('web.mode')}: {previewMeta.mode} · quality: {previewMeta.previewQuality} · bytes: {previewMeta.byteLength}
+                {t('web.mode')}: {previewMeta.mode} · {t('web.quality')}: {previewMeta.previewQuality} · {t('web.bytes')}: {previewMeta.byteLength}
               </p>
             ) : null}
             <div className="previewWrap">
@@ -194,7 +194,7 @@ function PreviewPane({
                   ? `${resolvedCanvas.paint_area.offset_x}, ${resolvedCanvas.paint_area.offset_y}, ${resolvedCanvas.paint_area.width}, ${resolvedCanvas.paint_area.height}`
                   : t('web.full_raster')}
               </li>
-              <li>canvas_is_dynamic: {canvasIsDynamic ? 'true' : 'false'}</li>
+              <li>{t('web.canvas_is_dynamic')}: {canvasIsDynamic ? t('label.true') : t('label.false')}</li>
             </ul>
           ) : (
             <p>{t('web.no_resolved_canvas')}</p>

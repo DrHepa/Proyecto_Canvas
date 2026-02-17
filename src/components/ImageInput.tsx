@@ -129,9 +129,10 @@ export default function ImageInput({
         <p>{isDragging ? dragActiveLabel : dropLabel}</p>
       </div>
 
-      <label htmlFor="image-upload-input">
+      <label className="fileButton" htmlFor="image-upload-input">
         {buttonLabel}
         <input
+          className="fileInput"
           ref={inputRef}
           id="image-upload-input"
           type="file"

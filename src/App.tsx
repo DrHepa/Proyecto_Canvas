@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { LatestCallCancelledError, PyWorkerClient, RpcError } from './py/client'
 import DyesPanel, { DyeInfo } from './components/DyesPanel'
 import DitherPanel from './components/DitherPanel'
@@ -91,8 +91,6 @@ type ExternalScanResult = {
 }
 
 type EngineBootstrapState = 'loading' | 'ready' | 'error'
-type GuiStyleId = 'reference' | 'studio' | 'compact' | 'kiosk'
-
 const DEFAULT_MAX_IMAGE_DIM = 4096
 const DEFAULT_PREVIEW_MAX_DIM = 1024
 const FAST_MAX_PIXELS = 350_000
@@ -158,13 +156,6 @@ function parseTemplateCategory(value: string | undefined): TemplateCategory {
   return 'all'
 }
 
-function parseGuiStyle(value: string | undefined): GuiStyleId {
-  if (value === 'reference' || value === 'studio' || value === 'compact' || value === 'kiosk') {
-    return value
-  }
-  return 'reference'
-}
-
 function sanitizeFileNamePart(value: string): string {
   return value
     .trim()
@@ -185,8 +176,6 @@ function App() {
     show_game_object: prefs.showGameObject ?? initialAppState.show_game_object
   })
   const [showAdvanced, setShowAdvanced] = useState(prefs.advancedOpen ?? false)
-  const [kioskControlsOpen, setKioskControlsOpen] = useState(false)
-  const [guiStyle, setGuiStyle] = useState<GuiStyleId>(parseGuiStyle(prefs.guiStyle))
   const [introDismissed, setIntroDismissed] = useState(prefs.introDismissed ?? false)
   const [introVisible, setIntroVisible] = useState(!introDismissed)
   const introHideTimerRef = useRef<number | null>(null)
@@ -337,7 +326,6 @@ function App() {
     const timeoutId = window.setTimeout(() => {
       savePrefs({
         lang: locale,
-        guiStyle,
         introDismissed,
         advancedOpen: showAdvanced,
         previewMode: state.preview_mode,
@@ -353,7 +341,6 @@ function App() {
       window.clearTimeout(timeoutId)
     }
   }, [
-    guiStyle,
     introDismissed,
     locale,
     maxImageDim,
@@ -452,7 +439,7 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client])
 
-  const statusLine = `Engine: ${engineStatus} · Templates: ${templates.length} · Dyes: ${availableDyes.length}`
+  const statusLine = `${t('web.engine_status')}: ${engineStatus} · ${t('web.templates_loaded')}: ${templates.length} · ${t('panel.dyes')}: ${availableDyes.length}`
 
   useEffect(() => {
     if (introHideTimerRef.current !== null) {
@@ -807,7 +794,7 @@ function App() {
     }
 
     try {
-      const response: ImageMeta = await runWithTiming('Loading image…', async () => {
+      const response: ImageMeta = await runWithTiming(t('status.opening_image'), async () => {
         return client.call(
           'pc.setImage',
           {
@@ -827,7 +814,7 @@ function App() {
     } catch (error) {
       const message = getErrorMessage(error)
       setImageInputError(message)
-      setImageInputWarning('Keeping previous preview after image load error.')
+      setImageInputWarning(t('web.warning_keep_previous_preview'))
       handleRpcError(error)
     }
   }
@@ -835,7 +822,7 @@ function App() {
   const handleGeneratePnt = async () => {
     const startedAt = performance.now()
     try {
-      const response: GeneratePntResult = await runWithTiming('Generating .pnt…', async () => {
+      const response: GeneratePntResult = await runWithTiming(t('status.generating_pnt'), async () => {
         await syncPcSettings(undefined, 'raster20')
         return client.call('pc.generatePnt', {
           settings: {
@@ -1011,7 +998,7 @@ function App() {
     }
 
     try {
-      const response: { enabledDyes: number[] } = await runWithTiming('Calculating best dyes…', async () => {
+      const response: { enabledDyes: number[] } = await runWithTiming(t('status.calculating_best_dyes'), async () => {
         await syncPcSettings()
         return client.call('pc.calculateBestColors', {
           n: bestColors,
@@ -1033,7 +1020,7 @@ function App() {
   const nonIntrusiveWarnings = [
     imageInputWarning,
     previewMaxDim >= HIGH_PREVIEW_WARNING_DIM
-      ? 'High preview resolution may be slower. Consider 1024 for smoother editing.'
+      ? t('web.warning_high_preview_dim')
       : null
   ].filter((message): message is string => Boolean(message))
 
@@ -1131,19 +1118,6 @@ function App() {
           </select>
         </label>
 
-        <label htmlFor="gui-style-selector">
-          {t('panel.gui_style')}
-          <select
-            id="gui-style-selector"
-            value={guiStyle}
-            onChange={(event) => setGuiStyle(parseGuiStyle(event.target.value))}
-          >
-            <option value="reference">{t('gui_style.reference')}</option>
-            <option value="studio">{t('gui_style.studio')}</option>
-            <option value="compact">{t('gui_style.compact')}</option>
-            <option value="kiosk">{t('gui_style.kiosk')}</option>
-          </select>
-        </label>
       </div>
     </header>
   )
@@ -1194,7 +1168,7 @@ function App() {
                   checked={showPerfHud}
                   onChange={(event) => setShowPerfHud(event.target.checked)}
                 />
-                Show Perf HUD
+                {t('web.show_perf_hud')}
               </label>
               {showPerfHud ? (
                 <PerfHud
@@ -1328,18 +1302,6 @@ function App() {
     </>
   )
 
-  const renderControlStack = () => (
-    <>
-      {renderSourcePanels()}
-      {renderCanvasPanels()}
-      {renderPreviewModePanel()}
-      {renderDyesPanel()}
-      {renderBorderAndDither()}
-      {renderAdvancedSection()}
-      {renderGenerateButton()}
-    </>
-  )
-
   const renderPreviewPane = () => (
     <PreviewPane
       busyTask={busyTask}
@@ -1357,15 +1319,8 @@ function App() {
     />
   )
 
-  const section = (label: string, content: ReactNode) => (
-    <details className="compact-section" open>
-      <summary>{label}</summary>
-      <div className="compact-section__body">{content}</div>
-    </details>
-  )
-
   return (
-    <main className={`app-shell theme-${guiStyle} layout-${guiStyle}`}>
+    <main className="app-shell theme-studio">
       <IntroSplash
         visible={introVisible}
         title={t('web.intro.title')}
@@ -1390,69 +1345,12 @@ function App() {
 
         {!ready ? <p>{t('web.loading_locales')}</p> : null}
 
-        {guiStyle === 'reference' ? (
-          <div className="workspace-layout">
-            <aside className="sidebar"><div className="panel-card">{renderControlStack()}</div></aside>
-            {renderPreviewPane()}
-          </div>
-        ) : null}
-
-        {guiStyle === 'studio' ? (
-          <div className="studio-layout">
-            <div className="panel-card studio-left">{renderSourcePanels()}{renderCanvasPanels()}</div>
-            <div className="studio-center">{renderPreviewPane()}</div>
-            <div className="panel-card studio-right">{renderPreviewModePanel()}{renderDyesPanel()}{renderBorderAndDither()}</div>
-            <div className="panel-card studio-bottom">{renderAdvancedSection()}{renderGenerateButton()}</div>
-          </div>
-        ) : null}
-
-        {guiStyle === 'compact' ? (
-          <div className="compact-layout">
-            <div className="compact-preview">{renderPreviewPane()}</div>
-            <div className="panel-card compact-controls">
-              {section(t('panel.image'), renderSourcePanels())}
-              {section(t('panel.canvas'), renderCanvasPanels())}
-              {section(t('panel.preview_mode'), renderPreviewModePanel())}
-              {section(t('panel.dyes'), renderDyesPanel())}
-              {section(t('panel.border'), <BorderPanel
-                config={state.border_config}
-                frameImages={availableFrameImages}
-                disabled={loading}
-                onChange={(value, options) => {
-                  pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
-                  dispatch({ type: 'setBorderConfig', payload: value })
-                }}
-              />)}
-              {section(t('panel.dithering'), <DitherPanel
-                config={state.dithering_config}
-                disabled={loading}
-                onChange={(value, options) => {
-                  pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
-                  dispatch({ type: 'setDitheringConfig', payload: value })
-                }}
-              />)}
-              {section(t('panel.advanced'), renderAdvancedSection())}
-              {renderGenerateButton()}
-            </div>
-          </div>
-        ) : null}
-
-        {guiStyle === 'kiosk' ? (
-          <div className="kiosk-layout">
-            <div className="kiosk-preview">{renderPreviewPane()}</div>
-            <button
-              className="kiosk-controls-toggle"
-              type="button"
-              onClick={() => setKioskControlsOpen((value) => !value)}
-              aria-expanded={kioskControlsOpen}
-            >
-              Controls
-            </button>
-            <aside className={`kiosk-controls ${kioskControlsOpen ? 'is-open' : ''}`}>
-              <div className="panel-card">{renderControlStack()}</div>
-            </aside>
-          </div>
-        ) : null}
+        <div className="studio-layout">
+          <div className="panel-card studio-left">{renderSourcePanels()}{renderCanvasPanels()}</div>
+          <div className="studio-center">{renderPreviewPane()}</div>
+          <div className="panel-card studio-right">{renderPreviewModePanel()}{renderDyesPanel()}{renderBorderAndDither()}</div>
+          <div className="panel-card studio-bottom">{renderAdvancedSection()}{renderGenerateButton()}</div>
+        </div>
       </section>
     </main>
   )
