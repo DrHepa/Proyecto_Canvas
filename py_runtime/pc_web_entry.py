@@ -1110,24 +1110,40 @@ def render_preview(mode: str = 'visual', settings: dict[str, Any] | None = None)
 
 
 def render_preview2(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """
+    Renderiza la vista previa y aplica un delta de settings en una única llamada.
+
+    Acepta `settings_delta`, `settingsDelta` o `settings` como diccionario de ajustes;
+    acepta tanto `preview_mode` como `previewMode`; acepta `return_format` y `returnFormat`;
+    y acepta `preview_max_dim` o `previewMaxDim`.
+    """
     from PIL import Image
 
     controller = _get_controller()
-    request = payload if isinstance(payload, dict) else {}
+    request: dict[str, Any] = payload if isinstance(payload, dict) else {}
 
-    settings_delta = request.get('settings_delta')
-    if isinstance(settings_delta, dict):
+    settings_delta: dict[str, Any] | None = None
+    for key in ('settings_delta', 'settingsDelta', 'settings'):
+        maybe = request.get(key)
+        if isinstance(maybe, dict):
+            settings_delta = maybe
+            break
+    if settings_delta is not None:
         apply_settings(settings_delta)
 
-    preview_mode = str(request.get('preview_mode') or 'visual').strip().lower()
+    raw_preview_mode = request.get('preview_mode') or request.get('previewMode') or 'visual'
+    preview_mode = str(raw_preview_mode).strip().lower()
     if preview_mode not in {'visual', 'ark_simulation'}:
         raise ValueError('preview_mode must be "visual" or "ark_simulation"')
 
-    return_format = str(request.get('return_format') or 'png').strip().lower()
+    raw_return_format = request.get('return_format') or request.get('returnFormat') or 'png'
+    return_format = str(raw_return_format).strip().lower()
     if return_format not in {'png', 'rgba'}:
         raise ValueError('return_format must be "png" or "rgba"')
 
     preview_max_dim = request.get('preview_max_dim')
+    if preview_max_dim is None:
+        preview_max_dim = request.get('previewMaxDim')
 
     controller.set_preview_mode(preview_mode)
     preview = controller.render_preview_if_possible()
@@ -1137,14 +1153,15 @@ def render_preview2(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     preview = _compose_preview_overlay_if_needed(controller=controller, preview=preview, mode=preview_mode)
 
     try:
-        max_dim_int = max(1, int(preview_max_dim))
-        max_side = max(preview.size)
-        if max_side > max_dim_int:
-            scale = max_dim_int / float(max_side)
-            preview = preview.resize(
-                (max(1, int(preview.width * scale)), max(1, int(preview.height * scale))),
-                Image.NEAREST,
-            )
+        max_dim_int = max(1, int(preview_max_dim)) if preview_max_dim is not None else None
+        if max_dim_int:
+            max_side = max(preview.size)
+            if max_side > max_dim_int:
+                scale = max_dim_int / float(max_side)
+                preview = preview.resize(
+                    (max(1, int(preview.width * scale)), max(1, int(preview.height * scale))),
+                    Image.NEAREST,
+                )
     except (TypeError, ValueError):
         pass
 
