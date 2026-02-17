@@ -385,10 +385,10 @@ def _apply_color_settings(controller: PreviewController, settings: dict[str, Any
     if state is None:
         return
 
-    use_all_dyes = bool(settings_obj.get('useAllDyes', True))
+    use_all_dyes = bool(settings_obj.get('useAllDyes', settings_obj.get('use_all_dyes', True)))
     setattr(state, 'use_all_dyes', use_all_dyes)
 
-    enabled_dyes = _to_int_set(settings_obj.get('enabledDyes'))
+    enabled_dyes = _to_int_set(settings_obj.get('enabledDyes', settings_obj.get('enabled_dyes', [])))
     if use_all_dyes:
         setattr(state, 'enabled_dyes', None)
     else:
