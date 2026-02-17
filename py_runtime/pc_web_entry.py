@@ -28,6 +28,7 @@ _EXTERNAL_LIB_ROOT = Path('/userlib')
 _FRAME_IMAGE_CACHE_MAX = 16
 _FRAME_IMAGE_CACHE: OrderedDict[str, 'Image.Image'] = OrderedDict()
 _BORDER_FRAME_DEBUG = os.environ.get('PC_BORDER_PERF_DEBUG', '0') == '1'
+_BORDER_FRAME_STRICT = os.environ.get('PC_BORDER_STRICT_DEBUG', '0') == '1'
 _BORDER_FRAME_OPEN_COUNT = 0
 _BORDER_FRAME_OPEN_WINDOW_START = time.monotonic()
 
@@ -438,61 +439,82 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if state is None:
         return {'ok': False, 'applied': False}
 
-    use_all_dyes = bool(settings_obj.get('useAllDyes', settings_obj.get('use_all_dyes', True)))
-    setattr(state, 'use_all_dyes', use_all_dyes)
+    has_use_all_dyes = 'useAllDyes' in settings_obj or 'use_all_dyes' in settings_obj
+    has_enabled_dyes = 'enabledDyes' in settings_obj or 'enabled_dyes' in settings_obj
+    if has_use_all_dyes or has_enabled_dyes:
+        use_all_dyes = bool(settings_obj.get('useAllDyes', settings_obj.get('use_all_dyes', getattr(state, 'use_all_dyes', True))))
+        setattr(state, 'use_all_dyes', use_all_dyes)
 
-    enabled_dyes = _to_int_set(settings_obj.get('enabledDyes', settings_obj.get('enabled_dyes', [])))
-    if use_all_dyes:
-        controller.set_enabled_dyes(None)
-    else:
-        if not enabled_dyes:
-            fallback_ids = [int(dye.get('id')) for dye in list_dyes() if isinstance(dye, dict) and isinstance(dye.get('id'), int)]
-            if 0 in fallback_ids:
-                enabled_dyes = {0}
-            elif fallback_ids:
-                enabled_dyes = {min(fallback_ids)}
-            else:
-                enabled_dyes = {0}
-        controller.set_enabled_dyes(enabled_dyes)
+        enabled_dyes = _to_int_set(settings_obj.get('enabledDyes', settings_obj.get('enabled_dyes', [])))
+        if use_all_dyes:
+            controller.set_enabled_dyes(None)
+        else:
+            if not enabled_dyes:
+                fallback_ids = [int(dye.get('id')) for dye in list_dyes() if isinstance(dye, dict) and isinstance(dye.get('id'), int)]
+                if 0 in fallback_ids:
+                    enabled_dyes = {0}
+                elif fallback_ids:
+                    enabled_dyes = {min(fallback_ids)}
+                else:
+                    enabled_dyes = {0}
+            controller.set_enabled_dyes(enabled_dyes)
 
-    best_colors = settings_obj.get('bestColors')
-    try:
-        best_colors_int = max(0, int(best_colors)) if best_colors is not None else 0
-    except (TypeError, ValueError):
-        best_colors_int = 0
+    if 'bestColors' in settings_obj:
+        best_colors = settings_obj.get('bestColors')
+        try:
+            best_colors_int = max(0, int(best_colors)) if best_colors is not None else 0
+        except (TypeError, ValueError):
+            best_colors_int = 0
 
-    setattr(state, 'best_colors', best_colors_int)
-    if best_colors_int > 0:
-        setattr(state, 'best_colors_ids', _resolve_ranked_dyes(controller, best_colors_int))
-    else:
-        setattr(state, 'best_colors_ids', [])
+        setattr(state, 'best_colors', best_colors_int)
+        if best_colors_int > 0:
+            setattr(state, 'best_colors_ids', _resolve_ranked_dyes(controller, best_colors_int))
+        else:
+            setattr(state, 'best_colors_ids', [])
 
-    dithering_config = _normalize_dithering_config(settings_obj.get('ditheringConfig'))
-    controller.set_dithering_config(mode=dithering_config['mode'], strength=dithering_config['strength'])
+    if 'ditheringConfig' in settings_obj:
+        dithering_config = _normalize_dithering_config(settings_obj.get('ditheringConfig'))
+        controller.set_dithering_config(mode=dithering_config['mode'], strength=dithering_config['strength'])
 
-    border_config = _normalize_border_config(settings_obj.get('borderConfig'))
-    frame_image_path = _resolve_frame_image_path(border_config.get('frame_image'))
-    frame_image_key = str(frame_image_path) if frame_image_path is not None else None
-    current_frame_key = getattr(state, 'border_frame_image_key', None)
+    if 'borderConfig' in settings_obj:
+        border_config = _normalize_border_config(settings_obj.get('borderConfig'))
+        frame_image_path = _resolve_frame_image_path(border_config.get('frame_image'))
+        frame_image_key = str(frame_image_path) if frame_image_path is not None else None
+        current_frame_key = getattr(state, 'border_frame_image_key', None)
 
-    controller.set_border_style(border_config['style'])
-    controller.set_border_size(border_config['size'])
+        controller.set_border_style(border_config['style'])
+        controller.set_border_size(border_config['size'])
 
-    if border_config['style'] == 'image' and frame_image_path is not None:
-        if frame_image_key != current_frame_key:
-            controller.set_border_frame_image(_get_cached_frame_image(frame_image_path))
-            setattr(state, 'border_frame_image_key', frame_image_key)
-    elif current_frame_key is not None:
-        controller.set_border_frame_image(None)
-        setattr(state, 'border_frame_image_key', None)
+        if border_config['style'] == 'image' and frame_image_path is not None:
+            if frame_image_key != current_frame_key:
+                frame_image_pil = _get_cached_frame_image(frame_image_path)
+                if _BORDER_FRAME_STRICT:
+                    original_set_image = controller.set_image
+                    try:
+                        def _blocked_set_image(*_args: Any, **_kwargs: Any) -> None:
+                            raise AssertionError('set_image() must not be used for border frame images')
 
-    preview_mode = str(settings_obj.get('preview_mode') or settings_obj.get('previewMode') or state.preview_mode or 'visual').strip().lower()
-    if preview_mode in {'visual', 'ark_simulation'}:
-        controller.set_preview_mode(preview_mode)
+                        controller.set_image = _blocked_set_image
+                        controller.set_border_frame_image(frame_image_pil)
+                    finally:
+                        controller.set_image = original_set_image
+                else:
+                    controller.set_border_frame_image(frame_image_pil)
+                setattr(state, 'border_frame_image_key', frame_image_key)
+        elif current_frame_key is not None:
+            controller.set_border_frame_image(None)
+            setattr(state, 'border_frame_image_key', None)
 
-    setattr(state, 'show_game_object', bool(settings_obj.get('show_game_object', getattr(state, 'show_game_object', False))))
+    if 'preview_mode' in settings_obj or 'previewMode' in settings_obj:
+        preview_mode = str(settings_obj.get('preview_mode') or settings_obj.get('previewMode') or '').strip().lower()
+        if preview_mode in {'visual', 'ark_simulation'}:
+            controller.set_preview_mode(preview_mode)
 
-    set_canvas_request(settings_obj.get('canvasRequest'))
+    if 'show_game_object' in settings_obj:
+        setattr(state, 'show_game_object', bool(settings_obj.get('show_game_object')))
+
+    if 'canvasRequest' in settings_obj:
+        set_canvas_request(settings_obj.get('canvasRequest'))
     return {'ok': True, 'applied': True}
 
 
