@@ -320,3 +320,18 @@ fieldset {
 .advanced-panel__diagnostics {
   margin-top: 0.5rem;
 }
+
+.status-warnings {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.status-warning {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #7c4a03;
+  border-radius: 0.5rem;
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+  font-size: 0.88rem;
+}

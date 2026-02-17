@@ -1,4 +1,5 @@
 import { ChangeEvent, DragEvent, useRef, useState } from 'react'
+import { ImageLoadResult, loadImageAndDownscaleIfNeeded } from '../utils/image'
 
 type ImageInputProps = {
   disabled?: boolean
@@ -7,8 +8,10 @@ type ImageInputProps = {
   dragActiveLabel: string
   invalidTypeMessage: string
   multipleFilesMessage: string
+  maxImageDim: number
   onError?: (message: string | null) => void
-  onImageSelected: (file: File, bytes: ArrayBuffer) => Promise<void> | void
+  onWarning?: (message: string | null) => void
+  onImageSelected: (file: File, image: ImageLoadResult) => Promise<void> | void
 }
 
 const ACCEPTED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
@@ -30,7 +33,9 @@ export default function ImageInput({
   dragActiveLabel,
   invalidTypeMessage,
   multipleFilesMessage,
+  maxImageDim,
   onError,
+  onWarning,
   onImageSelected
 }: ImageInputProps) {
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -46,9 +51,18 @@ export default function ImageInput({
       return
     }
 
-    onError?.(null)
-    const bytes = await file.arrayBuffer()
-    await onImageSelected(file, bytes)
+    try {
+      onError?.(null)
+      const image = await loadImageAndDownscaleIfNeeded(file, maxImageDim)
+      if (image.resized) {
+        onWarning?.(`Image resized to ${image.width}×${image.height} to match max image size (${maxImageDim}).`)
+      } else {
+        onWarning?.(null)
+      }
+      await onImageSelected(file, image)
+    } catch (error) {
+      onError?.(error instanceof Error ? error.message : String(error))
+    }
   }
 
   const handlePickerChange = async (event: ChangeEvent<HTMLInputElement>) => {
