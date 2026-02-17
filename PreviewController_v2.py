@@ -24,9 +24,11 @@ from TemplateDescriptorLoader import TemplateDescriptorLoader
 from paths import get_app_root
 
 import os
+import time
 
 # Debug-only: allow APC paint_area profile toggling if PC_ENABLE_APC_DEBUG=1
 PC_ENABLE_APC_DEBUG = os.environ.get('PC_ENABLE_APC_DEBUG', '0') == '1'
+PC_BORDER_PERF_DEBUG = os.environ.get('PC_BORDER_PERF_DEBUG', '0') == '1'
 
 
 # ======================================================
@@ -68,7 +70,8 @@ class AppState:
     # Options
     enabled_dyes: Optional[set[int]] = None
     dithering_config: dict = field(default_factory=lambda: {"mode": "none", "strength": 0.5})
-    border_config: dict = field(default_factory=lambda: {"style": "none", "size": 0, "frame_image": None})
+    border_config: dict = field(default_factory=lambda: {"style": "none", "size": 0, "frame_image": None, "frame_image_np": None})
+    border_frame_image_key: Optional[str] = None
     game_object_type: Optional[str] = None
     show_game_object: bool = False
 
@@ -141,6 +144,8 @@ class PreviewController:
 
         # Last generation target (optional, used by GUI)
         self._last_generated_path: Optional[Path] = None
+        self._border_np_convert_count = 0
+        self._border_np_convert_window_start = time.monotonic()
 
     # ==================================================
     # Template helpers
@@ -536,8 +541,23 @@ class PreviewController:
 
     def set_border_frame_image(self, image: Optional[Image.Image]) -> None:
         self.state.border_config["frame_image"] = image
+        if image is None:
+            self.state.border_config["frame_image_np"] = None
+        else:
+            self._debug_note_border_np_conversion()
+            self.state.border_config["frame_image_np"] = np.array(image.convert("RGBA"), dtype=np.uint8)
         self._prepared_image_rgba = None
         self._refresh()
+
+    def _debug_note_border_np_conversion(self) -> None:
+        if not PC_BORDER_PERF_DEBUG:
+            return
+        now = time.monotonic()
+        if now - self._border_np_convert_window_start >= 60.0:
+            print(f"[PC_BORDER_PERF_DEBUG] border frame PIL->np conversions/min={self._border_np_convert_count}")
+            self._border_np_convert_count = 0
+            self._border_np_convert_window_start = now
+        self._border_np_convert_count += 1
 
     def set_planks(self, planks: Optional[list[dict]]) -> None:
         """
@@ -1668,12 +1688,17 @@ class PreviewController:
 
             if style == "image":
                 frame_img = border.get("frame_image")
-                if frame_img is not None:
+                frame_image_np = border.get("frame_image_np")
+                if frame_image_np is None and frame_img is not None:
+                    self._debug_note_border_np_conversion()
+                    frame_image_np = np.array(frame_img.convert("RGBA"), dtype=np.uint8)
+                    border["frame_image_np"] = frame_image_np
+                if frame_image_np is not None:
                     canvas_visible = apply_frame_border(
                         canvas_visible,
                         border_size=size,
                         style="image",
-                        frame_image=np.array(frame_img.convert("RGBA"), dtype=np.uint8),
+                        frame_image=frame_image_np,
                     )
             else:
                 canvas_visible = apply_frame_border(canvas_visible, border_size=size, style=style)

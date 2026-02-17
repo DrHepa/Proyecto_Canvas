@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sys
-from collections import Counter
+import time
+from collections import Counter, OrderedDict
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,6 +25,11 @@ _FRAME_DIRECTORIES = (
     _ASSETS_ROOT / 'Frames',
 )
 _EXTERNAL_LIB_ROOT = Path('/userlib')
+_FRAME_IMAGE_CACHE_MAX = 16
+_FRAME_IMAGE_CACHE: OrderedDict[str, 'Image.Image'] = OrderedDict()
+_BORDER_FRAME_DEBUG = os.environ.get('PC_BORDER_PERF_DEBUG', '0') == '1'
+_BORDER_FRAME_OPEN_COUNT = 0
+_BORDER_FRAME_OPEN_WINDOW_START = time.monotonic()
 
 
 def _ensure_runtime_paths() -> None:
@@ -212,6 +219,38 @@ def _resolve_frame_image_path(frame_image: str | None) -> Path | None:
     return None
 
 
+def _debug_note_frame_open() -> None:
+    global _BORDER_FRAME_OPEN_COUNT, _BORDER_FRAME_OPEN_WINDOW_START
+    if not _BORDER_FRAME_DEBUG:
+        return
+    now = time.monotonic()
+    if now - _BORDER_FRAME_OPEN_WINDOW_START >= 60.0:
+        print(f"[PC_BORDER_PERF_DEBUG] frame_image Image.open/min={_BORDER_FRAME_OPEN_COUNT}")
+        _BORDER_FRAME_OPEN_COUNT = 0
+        _BORDER_FRAME_OPEN_WINDOW_START = now
+    _BORDER_FRAME_OPEN_COUNT += 1
+
+
+def _get_cached_frame_image(frame_image_path: Path) -> 'Image.Image':
+    from PIL import Image
+
+    key = str(frame_image_path)
+    cached = _FRAME_IMAGE_CACHE.get(key)
+    if cached is not None:
+        _FRAME_IMAGE_CACHE.move_to_end(key)
+        return cached.copy()
+
+    _debug_note_frame_open()
+    with Image.open(frame_image_path) as frame_image:
+        frame_rgba = frame_image.convert('RGBA').copy()
+
+    _FRAME_IMAGE_CACHE[key] = frame_rgba
+    _FRAME_IMAGE_CACHE.move_to_end(key)
+    if len(_FRAME_IMAGE_CACHE) > _FRAME_IMAGE_CACHE_MAX:
+        _FRAME_IMAGE_CACHE.popitem(last=False)
+    return frame_rgba.copy()
+
+
 
 def scanExternal(
     root: str | None = None,
@@ -393,8 +432,6 @@ def _resolve_ranked_dyes(controller: PreviewController, best_colors: int) -> lis
 
 
 def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
-    from PIL import Image
-
     controller = _get_controller()
     settings_obj = settings if isinstance(settings, dict) else {}
     state = getattr(controller, 'state', None)
@@ -435,14 +472,19 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
     border_config = _normalize_border_config(settings_obj.get('borderConfig'))
     frame_image_path = _resolve_frame_image_path(border_config.get('frame_image'))
-    frame_image_obj = None
-    if frame_image_path is not None:
-        with Image.open(frame_image_path) as frame_image:
-            frame_image_obj = frame_image.convert('RGBA').copy()
+    frame_image_key = str(frame_image_path) if frame_image_path is not None else None
+    current_frame_key = getattr(state, 'border_frame_image_key', None)
 
     controller.set_border_style(border_config['style'])
     controller.set_border_size(border_config['size'])
-    controller.set_border_frame_image(frame_image_obj)
+
+    if border_config['style'] == 'image' and frame_image_path is not None:
+        if frame_image_key != current_frame_key:
+            controller.set_border_frame_image(_get_cached_frame_image(frame_image_path))
+            setattr(state, 'border_frame_image_key', frame_image_key)
+    elif current_frame_key is not None:
+        controller.set_border_frame_image(None)
+        setattr(state, 'border_frame_image_key', None)
 
     preview_mode = str(settings_obj.get('preview_mode') or settings_obj.get('previewMode') or state.preview_mode or 'visual').strip().lower()
     if preview_mode in {'visual', 'ark_simulation'}:
