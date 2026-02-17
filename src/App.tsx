@@ -449,6 +449,19 @@ function App() {
     return getAllDyeIds()
   }
 
+  const pickFallbackDyeId = (): number | null => {
+    if (availableDyes.length === 0) {
+      return null
+    }
+
+    const white = availableDyes.find((dye) => dye.id === 0)
+    if (white) {
+      return white.id
+    }
+
+    return availableDyes[0]?.id ?? null
+  }
+
   const handleUseAllDyesChange = (nextUseAll: boolean) => {
     if (nextUseAll) {
       setUseAllDyes(true)
@@ -468,6 +481,9 @@ function App() {
     }
 
     if (manual.has(dyeId)) {
+      if (manual.size <= 1) {
+        return
+      }
       manual.delete(dyeId)
     } else {
       manual.add(dyeId)
@@ -483,6 +499,13 @@ function App() {
     }
 
     const nextSelection = enabled ? getAllDyeIds() : new Set<number>()
+    if (!enabled && nextSelection.size === 0) {
+      const fallback = pickFallbackDyeId()
+      if (fallback !== null) {
+        nextSelection.add(fallback)
+      }
+    }
+
     dispatch({ type: 'setEnabledDyes', payload: nextSelection })
     setLastManualEnabledDyes(new Set(nextSelection))
   }
@@ -686,9 +709,12 @@ function App() {
         })
       })
 
+      const outputBytes = new Uint8Array(response.outputBytes)
+      const isZipMagic = outputBytes.length >= 2 && outputBytes[0] === 0x50 && outputBytes[1] === 0x4b
+
       const blueprintPart = sanitizeFileNamePart(state.selected_template_id || 'template')
       const imagePart = sanitizeFileNamePart(originalImageName || 'image')
-      const outputFileName = response.outputKind === 'zip'
+      const outputFileName = isZipMagic
         ? `${imagePart}_${blueprintPart}.zip`
         : `${imagePart}_${blueprintPart}.pnt`
 
@@ -702,7 +728,12 @@ function App() {
       link.remove()
       URL.revokeObjectURL(downloadUrl)
 
-      setResult(`generated=${response.byteLength} bytes, writerMode=${response.writerMode}, file=${outputFileName}`)
+      const isMultiCanvas = canvasLayout?.kind === 'multi_canvas'
+      if (isMultiCanvas && !isZipMagic) {
+        setResult(`generated=${response.byteLength} bytes, writerMode=${response.writerMode}, file=${outputFileName} (warning: multi_canvas expected ZIP payload, got non-ZIP output)`)
+      } else {
+        setResult(`generated=${response.byteLength} bytes, writerMode=${response.writerMode}, file=${outputFileName}`)
+      }
     } catch (error) {
       handleRpcError(error)
     }

@@ -100,6 +100,8 @@ type RpcMethodMap = {
       count: number
       dyes: Array<{
         id: number
+        observed_byte?: number
+        game_id: number | null
         name: string
         hex: string | null
         linear_rgb: [number, number, number] | null
