@@ -464,15 +464,25 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 return settings_obj[k]
         return default
 
+    dyes_obj = settings_obj.get('dyes') if isinstance(settings_obj.get('dyes'), dict) else None
+    dithering_alias = settings_obj.get('dithering') if 'ditheringConfig' not in settings_obj and 'dithering_config' not in settings_obj else None
+    border_alias = settings_obj.get('border') if 'borderConfig' not in settings_obj and 'border_config' not in settings_obj else None
+
     # --- DYES / PALETTE ---
-    if _has('useAllDyes', 'use_all_dyes', 'enabledDyes', 'enabled_dyes'):
-        use_all_dyes = bool(_get('useAllDyes', 'use_all_dyes', default=getattr(state, 'use_all_dyes', True)))
+    if _has('useAllDyes', 'use_all_dyes', 'enabledDyes', 'enabled_dyes', 'dyes'):
+        use_all_dyes_value = _get('useAllDyes', 'use_all_dyes', default=None)
+        if use_all_dyes_value is None and isinstance(dyes_obj, dict):
+            use_all_dyes_value = _get_any(dyes_obj, 'useAllDyes', 'use_all_dyes', default=None)
+        use_all_dyes = bool(use_all_dyes_value if use_all_dyes_value is not None else getattr(state, 'use_all_dyes', True))
         setattr(state, 'use_all_dyes', use_all_dyes)
 
         if use_all_dyes:
             controller.set_enabled_dyes(None)
         else:
-            enabled_dyes = _to_int_set(_get('enabledDyes', 'enabled_dyes', default=[]))
+            enabled_dyes_raw = _get('enabledDyes', 'enabled_dyes', default=None)
+            if enabled_dyes_raw is None and isinstance(dyes_obj, dict):
+                enabled_dyes_raw = _get_any(dyes_obj, 'enabledDyes', 'enabled_dyes', default=[])
+            enabled_dyes = _to_int_set(enabled_dyes_raw)
             if not enabled_dyes:
                 # Defensive fallback: never allow empty palette.
                 fallback_ids: list[int] = []
@@ -505,14 +515,14 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             setattr(state, 'best_colors_ids', [])
 
     # --- DITHERING ---
-    if _has('ditheringConfig', 'dithering_config'):
-        dithering_raw = _get('ditheringConfig', 'dithering_config')
+    if _has('ditheringConfig', 'dithering_config', 'dithering'):
+        dithering_raw = _get('ditheringConfig', 'dithering_config', default=dithering_alias)
         dithering_config = _normalize_dithering_config(dithering_raw)
         controller.set_dithering_config(mode=dithering_config['mode'], strength=dithering_config['strength'])
 
     # --- BORDER ---
-    if _has('borderConfig', 'border_config'):
-        border_raw = _get('borderConfig', 'border_config')
+    if _has('borderConfig', 'border_config', 'border'):
+        border_raw = _get('borderConfig', 'border_config', default=border_alias)
         if isinstance(border_raw, dict):
             # Accept both frame_image and frameImage (UI variants)
             if 'frame_image' not in border_raw and 'frameImage' in border_raw:
@@ -589,8 +599,8 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             controller.set_preview_mode(preview_mode)
 
     # --- SHOW GAME OBJECT OVERLAY ---
-    if _has('show_game_object', 'showGameObject'):
-        setattr(state, 'show_game_object', bool(_get('show_game_object', 'showGameObject')))
+    if _has('show_game_object', 'showGameObject', 'show_object'):
+        setattr(state, 'show_game_object', bool(_get('show_game_object', 'showGameObject', 'show_object')))
 
     # --- CANVAS REQUEST (dynamic/multi) ---
     if _has('canvasRequest', 'canvas_request'):
