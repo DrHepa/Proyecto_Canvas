@@ -42,17 +42,12 @@ function clampToRange(value: number, range: CanvasRange): number {
   return Math.max(range.min, Math.min(range.max, floored))
 }
 
-function toNumber(value: string): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
 function parseInteger(value: string): number | null {
-  if (value.trim() === '') {
+  if (value === '' || !/^\d+$/.test(value)) {
     return null
   }
 
-  const parsed = Number(value)
+  const parsed = Number.parseInt(value, 10)
   return Number.isInteger(parsed) ? parsed : null
 }
 
@@ -67,6 +62,10 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
   const [colsText, setColsText] = useState('')
   const [rowsYText, setRowsYText] = useState('')
   const [blocksXText, setBlocksXText] = useState('')
+  const [isEditingRows, setIsEditingRows] = useState(false)
+  const [isEditingCols, setIsEditingCols] = useState(false)
+  const [isEditingRowsY, setIsEditingRowsY] = useState(false)
+  const [isEditingBlocksX, setIsEditingBlocksX] = useState(false)
 
   const multiCanvasRows =
     layout?.kind === 'multi_canvas' ? clampToRange(request?.rows ?? layout.rows.default, layout.rows) : null
@@ -77,28 +76,28 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
     layout?.kind === 'dynamic' ? clampToRange(request?.blocks_x ?? layout.blocks_x.default, layout.blocks_x) : null
 
   useEffect(() => {
-    if (multiCanvasRows !== null) {
+    if (!isEditingRows && multiCanvasRows !== null) {
       setRowsText(String(multiCanvasRows))
     }
-  }, [multiCanvasRows])
+  }, [isEditingRows, multiCanvasRows])
 
   useEffect(() => {
-    if (multiCanvasCols !== null) {
+    if (!isEditingCols && multiCanvasCols !== null) {
       setColsText(String(multiCanvasCols))
     }
-  }, [multiCanvasCols])
+  }, [isEditingCols, multiCanvasCols])
 
   useEffect(() => {
-    if (dynamicRowsY !== null) {
+    if (!isEditingRowsY && dynamicRowsY !== null) {
       setRowsYText(String(dynamicRowsY))
     }
-  }, [dynamicRowsY])
+  }, [dynamicRowsY, isEditingRowsY])
 
   useEffect(() => {
-    if (dynamicBlocksX !== null) {
+    if (!isEditingBlocksX && dynamicBlocksX !== null) {
       setBlocksXText(String(dynamicBlocksX))
     }
-  }, [dynamicBlocksX])
+  }, [dynamicBlocksX, isEditingBlocksX])
 
   if (!layout || layout.kind === 'fixed') {
     return null
@@ -121,6 +120,7 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
               max={layout.rows.max}
               step={1}
               value={rowsText}
+              onFocus={() => setIsEditingRows(true)}
               onChange={(event) => {
                 const nextText = event.target.value
                 setRowsText(nextText)
@@ -134,7 +134,9 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
                 }
               }}
               onBlur={(event) => {
-                const finalValue = clampToRange(toNumber(event.target.value), layout.rows)
+                setIsEditingRows(false)
+                const parsed = parseInteger(event.target.value)
+                const finalValue = parsed === null ? rows : clampToRange(parsed, layout.rows)
                 setRowsText(String(finalValue))
                 onChange({
                   rows: finalValue,
@@ -151,6 +153,7 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
               max={layout.cols.max}
               step={1}
               value={colsText}
+              onFocus={() => setIsEditingCols(true)}
               onChange={(event) => {
                 const nextText = event.target.value
                 setColsText(nextText)
@@ -164,7 +167,9 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
                 }
               }}
               onBlur={(event) => {
-                const finalValue = clampToRange(toNumber(event.target.value), layout.cols)
+                setIsEditingCols(false)
+                const parsed = parseInteger(event.target.value)
+                const finalValue = parsed === null ? cols : clampToRange(parsed, layout.cols)
                 setColsText(String(finalValue))
                 onChange({
                   rows,
@@ -194,6 +199,7 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
             max={layout.rows_y.max}
             step={1}
             value={rowsYText}
+            onFocus={() => setIsEditingRowsY(true)}
             onChange={(event) => {
               const nextText = event.target.value
               setRowsYText(nextText)
@@ -207,7 +213,9 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
               }
             }}
             onBlur={(event) => {
-              const finalValue = clampToRange(toNumber(event.target.value), layout.rows_y)
+              setIsEditingRowsY(false)
+              const parsed = parseInteger(event.target.value)
+              const finalValue = parsed === null ? rowsY : clampToRange(parsed, layout.rows_y)
               setRowsYText(String(finalValue))
               onChange({
                 rows_y: finalValue,
@@ -224,6 +232,7 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
             max={layout.blocks_x.max}
             step={1}
             value={blocksXText}
+            onFocus={() => setIsEditingBlocksX(true)}
             onChange={(event) => {
               const nextText = event.target.value
               setBlocksXText(nextText)
@@ -237,7 +246,9 @@ function CanvasLayoutPanel({ layout, request, disabled = false, onChange }: Canv
               }
             }}
             onBlur={(event) => {
-              const finalValue = clampToRange(toNumber(event.target.value), layout.blocks_x)
+              setIsEditingBlocksX(false)
+              const parsed = parseInteger(event.target.value)
+              const finalValue = parsed === null ? blocksX : clampToRange(parsed, layout.blocks_x)
               setBlocksXText(String(finalValue))
               onChange({
                 rows_y: rowsY,
