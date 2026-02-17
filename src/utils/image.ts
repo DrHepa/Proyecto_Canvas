@@ -4,6 +4,9 @@ export type ImageLoadResult = {
   height: number
   resized: boolean
   mime: string
+  originalWidth: number
+  originalHeight: number
+  effectiveFile: File
 }
 
 export async function loadImageAndDownscaleIfNeeded(
@@ -21,7 +24,16 @@ export async function loadImageAndDownscaleIfNeeded(
   const biggestDim = Math.max(width, height)
 
   if (biggestDim <= maxDim) {
-    return { bytes: buf, width, height, resized: false, mime }
+    return {
+      bytes: buf,
+      width,
+      height,
+      resized: false,
+      mime,
+      originalWidth: width,
+      originalHeight: height,
+      effectiveFile: file
+    }
   }
 
   const scale = maxDim / biggestDim
@@ -37,7 +49,7 @@ export async function loadImageAndDownscaleIfNeeded(
     throw new Error('Unable to create 2D rendering context for image resizing.')
   }
 
-  context.imageSmoothingEnabled = true
+  context.imageSmoothingEnabled = false
   context.drawImage(bitmap, 0, 0, nextWidth, nextHeight)
 
   const outBlob = await new Promise<Blob>((resolve, reject) => {
@@ -51,11 +63,18 @@ export async function loadImageAndDownscaleIfNeeded(
   })
 
   const outBytes = new Uint8Array(await outBlob.arrayBuffer())
+  const resizedFile = new File([outBlob], `${file.name.replace(/\.[^/.]+$/, '') || 'image'}_downscaled.png`, {
+    type: 'image/png'
+  })
+
   return {
     bytes: outBytes,
     width: nextWidth,
     height: nextHeight,
     resized: true,
-    mime: 'image/png'
+    mime: 'image/png',
+    originalWidth: width,
+    originalHeight: height,
+    effectiveFile: resizedFile
   }
 }

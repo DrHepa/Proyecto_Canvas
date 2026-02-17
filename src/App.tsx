@@ -9,6 +9,7 @@ import ImageInput from './components/ImageInput'
 import { ExternalPntEntry } from './components/ExternalLibraryPanel'
 import AdvancedPanel from './components/AdvancedPanel'
 import PreviewPane from './components/PreviewPane'
+import PerfHud, { PerfEventType, PerfReport } from './components/PerfHud'
 import { useI18n } from './i18n/I18nProvider'
 import { appStateReducer, initialAppState } from './state/store'
 import { ImageMeta, TemplateCategory, WriterMode } from './state/types'
@@ -88,6 +89,13 @@ const DEFAULT_MAX_IMAGE_DIM = 4096
 const DEFAULT_PREVIEW_MAX_DIM = 1024
 const PREVIEW_CACHE_LIMIT = 30
 const HIGH_PREVIEW_WARNING_DIM = 1536
+const PERF_HISTORY_LIMIT = 60
+const APP_VERSION = '0.0.0'
+
+type PerfEvent = {
+  type: PerfEventType
+  ms: number
+}
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -171,6 +179,12 @@ function App() {
   const [externalEntries, setExternalEntries] = useState<ExternalPntEntry[]>([])
   const [selectedExternalPath, setSelectedExternalPath] = useState<string | null>(null)
   const [folderPickerSupported, setFolderPickerSupported] = useState(false)
+  const [perfEvents, setPerfEvents] = useState<PerfEvent[]>([])
+  const [cancelCount, setCancelCount] = useState(0)
+  const [cacheHits, setCacheHits] = useState(0)
+  const [cacheMisses, setCacheMisses] = useState(0)
+  const [recentIssues, setRecentIssues] = useState<string[]>([])
+  const [showPerfHud, setShowPerfHud] = useState(false)
   const pendingTemplateIdRef = useRef<string | null>(prefs.lastTemplateId ?? null)
   const initialPrefsAppliedRef = useRef(false)
   const previewCacheRef = useRef<Map<string, string>>(new Map())
@@ -239,8 +253,18 @@ function App() {
     return `Unknown error: ${String(error)}`
   }
 
+  const pushRecentIssue = (issue: string) => {
+    setRecentIssues((current) => [issue, ...current].slice(0, 8))
+  }
+
+  const recordPerfEvent = (type: PerfEventType, ms: number) => {
+    setPerfEvents((current) => [{ type, ms }, ...current].slice(0, PERF_HISTORY_LIMIT))
+  }
+
   const handleRpcError = (error: unknown) => {
-    setResult(getErrorMessage(error))
+    const message = getErrorMessage(error)
+    setResult(message)
+    pushRecentIssue(message)
   }
 
   const runWithTiming = async <T,>(task: string, operation: () => Promise<T>): Promise<T> => {
@@ -609,6 +633,7 @@ function App() {
     const cacheKey = `${previewKey}::${quality}`
     const cached = getCachedPreviewUrl(cacheKey)
     if (cached) {
+      setCacheHits((count) => count + 1)
       if (generation !== previewGenerationRef.current) {
         return
       }
@@ -619,6 +644,7 @@ function App() {
       return
     }
 
+    setCacheMisses((count) => count + 1)
     const startedAt = performance.now()
     setIsRenderingPreview(true)
     setResult('')
@@ -650,10 +676,13 @@ function App() {
 
       setPreviewImageUrl(nextPreviewUrl)
       setPreviewMeta(response)
-      setLastOpTimeMs(performance.now() - startedAt)
+      const elapsedMs = performance.now() - startedAt
+      recordPerfEvent(quality === 'fast' ? 'preview-fast' : 'preview-final', elapsedMs)
+      setLastOpTimeMs(elapsedMs)
       setResult(`previewMode=${response.mode}, pngBytes=${response.byteLength}`)
     } catch (error) {
       if (error instanceof LatestCallCancelledError) {
+        setCancelCount((count) => count + 1)
         return
       }
       handleRpcError(error)
@@ -688,13 +717,15 @@ function App() {
       setImageInputError(null)
       setResult(`imageLoaded=${response.ok}, w=${response.w}, h=${response.h}, mode=${response.mode}`)
     } catch (error) {
-      dispatch({ type: 'setImageMeta', payload: null })
-      setImageInputError(getErrorMessage(error))
+      const message = getErrorMessage(error)
+      setImageInputError(message)
+      setImageInputWarning('Keeping previous preview after image load error.')
       handleRpcError(error)
     }
   }
 
   const handleGeneratePnt = async () => {
+    const startedAt = performance.now()
     try {
       const response: GeneratePntResult = await runWithTiming('Generating .pnt…', async () => {
         await syncPcSettings(undefined, 'raster20')
@@ -729,6 +760,8 @@ function App() {
       URL.revokeObjectURL(downloadUrl)
 
       const isMultiCanvas = canvasLayout?.kind === 'multi_canvas'
+      recordPerfEvent('generate', performance.now() - startedAt)
+
       if (isMultiCanvas && !isZipMagic) {
         setResult(`generated=${response.byteLength} bytes, writerMode=${response.writerMode}, file=${outputFileName} (warning: multi_canvas expected ZIP payload, got non-ZIP output)`)
       } else {
@@ -905,6 +938,75 @@ function App() {
       : null
   ].filter((message): message is string => Boolean(message))
 
+  const perfSummary = useMemo(() => {
+    const grouped = perfEvents.reduce<Record<PerfEventType, number[]>>((acc, event) => {
+      acc[event.type].push(event.ms)
+      return acc
+    }, {
+      'preview-fast': [],
+      'preview-final': [],
+      generate: []
+    })
+
+    return {
+      fastPreviewMs: grouped['preview-fast'][0] ?? null,
+      finalPreviewMs: grouped['preview-final'][0] ?? null,
+      generateMs: grouped.generate[0] ?? null,
+      calls: perfEvents.length,
+      cancels: cancelCount,
+      cacheHits,
+      cacheMisses
+    }
+  }, [cacheHits, cacheMisses, cancelCount, perfEvents])
+
+  const perfReport: PerfReport = useMemo(() => {
+    const groupedTimings = perfEvents.reduce<Record<PerfEventType, number[]>>((acc, event) => {
+      acc[event.type].push(event.ms)
+      return acc
+    }, {
+      'preview-fast': [],
+      'preview-final': [],
+      generate: []
+    })
+
+    return {
+      build: {
+        version: APP_VERSION
+      },
+      userAgent: navigator.userAgent,
+      templateId: state.selected_template_id || null,
+      canvasKind: canvasLayout?.kind ?? null,
+      imageMeta: state.image_meta ? { w: state.image_meta.w, h: state.image_meta.h } : null,
+      limits: {
+        previewMaxDim,
+        maxImageDim
+      },
+      settingsDigest: previewDepsHash,
+      metrics: perfSummary,
+      recentTimings: groupedTimings,
+      recentWarnings: nonIntrusiveWarnings.slice(0, 10),
+      recentErrors: recentIssues
+    }
+  }, [canvasLayout?.kind, maxImageDim, nonIntrusiveWarnings, perfEvents, perfSummary, previewDepsHash, previewMaxDim, recentIssues, state.image_meta, state.selected_template_id])
+
+  const copyPerfReport = async () => {
+    const content = JSON.stringify(perfReport, null, 2)
+    await navigator.clipboard.writeText(content)
+  }
+
+  const downloadPerfReport = () => {
+    const content = JSON.stringify(perfReport, null, 2)
+    const blob = new Blob([content], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'report.json'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <main className="app-shell">
       <section className="card" aria-busy={loading}>
@@ -1069,7 +1171,24 @@ function App() {
                     void handleUseExternal()
                   }}
                   diagnostics={(
-                    <p className="status-line">{statusLine}</p>
+                    <div>
+                      <p className="status-line">{statusLine}</p>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={showPerfHud}
+                          onChange={(event) => setShowPerfHud(event.target.checked)}
+                        />
+                        Show Perf HUD
+                      </label>
+                      {showPerfHud ? (
+                        <PerfHud
+                          summary={perfSummary}
+                          onCopyReport={copyPerfReport}
+                          onDownloadReport={downloadPerfReport}
+                        />
+                      ) : null}
+                    </div>
                   )}
                 />
               ) : null}
