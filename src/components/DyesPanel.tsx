@@ -3,6 +3,8 @@ import { useI18n } from '../i18n/I18nProvider'
 
 export type DyeInfo = {
   id: number
+  observed_byte?: number
+  game_id?: number | null
   name: string
   hex: string | null
   linear_rgb: [number, number, number] | null
@@ -109,7 +111,8 @@ export function DyesPanel({
         <div className="dyeGrid">
           {dyes.map((dye) => {
             const checked = enabledDyes.has(dye.id)
-            const tooltip = `${dye.id} · ${dye.name}`
+            const gameIdText = dye.game_id === null || dye.game_id === undefined ? 'null' : String(dye.game_id)
+            const tooltip = `byte=${dye.id} · game_id=${gameIdText} · ${dye.name}`
             return (
               <button
                 key={dye.id}

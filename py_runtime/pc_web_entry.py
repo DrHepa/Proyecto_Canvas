@@ -96,16 +96,24 @@ def _extract_dyes_from_translator(translator: Any) -> list[dict[str, Any]]:
     for item in candidates:
         if not isinstance(item, dict):
             continue
-        dye_id_raw = item.get('game_id', item.get('id', item.get('index')))
+        observed_raw = item.get('observed_byte', item.get('byte', item.get('id', item.get('index'))))
+        game_id_raw = item.get('game_id')
         try:
-            dye_id = int(dye_id_raw)
+            observed_byte = int(observed_raw)
         except (TypeError, ValueError):
             continue
 
+        try:
+            game_id = int(game_id_raw)
+        except (TypeError, ValueError):
+            game_id = None
+
         output.append(
             {
-                'id': dye_id,
-                'name': str(item.get('name') or f'Dye {dye_id}'),
+                'id': observed_byte,
+                'observed_byte': observed_byte,
+                'game_id': game_id,
+                'name': str(item.get('name') or f'Dye {observed_byte}'),
                 'hex': str(item.get('hex_srgb') or item.get('hex') or '').strip() or None,
                 'linear_rgb': item.get('linear_rgb') if isinstance(item.get('linear_rgb'), list) else None,
             }
@@ -134,14 +142,21 @@ def _fallback_dyes_from_tabla() -> list[dict[str, Any]]:
         if not isinstance(entry, dict):
             continue
         try:
-            dye_id = int(entry.get('game_id'))
+            observed_byte = int(entry.get('observed_byte'))
         except (TypeError, ValueError):
             continue
 
+        try:
+            game_id = int(entry.get('game_id'))
+        except (TypeError, ValueError):
+            game_id = None
+
         output.append(
             {
-                'id': dye_id,
-                'name': str(entry.get('name') or f'Dye {dye_id}'),
+                'id': observed_byte,
+                'observed_byte': observed_byte,
+                'game_id': game_id,
+                'name': str(entry.get('name') or f'Dye {observed_byte}'),
                 'hex': str(entry.get('hex_srgb') or '').strip() or None,
                 'linear_rgb': entry.get('linear_rgb') if isinstance(entry.get('linear_rgb'), list) else None,
             }
@@ -364,7 +379,7 @@ def _resolve_ranked_dyes(controller: PreviewController, best_colors: int) -> lis
         ranked_ids: list[int] = []
         for item in ranking:
             if isinstance(item, dict):
-                raw = item.get('id', item.get('dye_id', item.get('game_id')))
+                raw = item.get('observed_byte', item.get('id', item.get('dye_id', item.get('game_id'))))
             else:
                 raw = item
             try:
@@ -393,6 +408,14 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if use_all_dyes:
         controller.set_enabled_dyes(None)
     else:
+        if not enabled_dyes:
+            fallback_ids = [int(dye.get('id')) for dye in list_dyes() if isinstance(dye, dict) and isinstance(dye.get('id'), int)]
+            if 0 in fallback_ids:
+                enabled_dyes = {0}
+            elif fallback_ids:
+                enabled_dyes = {min(fallback_ids)}
+            else:
+                enabled_dyes = {0}
         controller.set_enabled_dyes(enabled_dyes)
 
     best_colors = settings_obj.get('bestColors')
