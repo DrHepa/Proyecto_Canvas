@@ -2729,7 +2729,7 @@ class PreviewGUI(tk.Tk):
             pass
 
         img = Image.open(path).convert("RGBA")
-        self.controller.set_image(img)
+        self.controller.set_image(img, image_name=Path(path).name)
         self.image_label.config(text=os.path.basename(path))
         self._schedule_redraw()
 
@@ -3367,17 +3367,23 @@ class PreviewGUI(tk.Tk):
         tpl_type = identity["type"]
 
         # Nombre por defecto
+        def _safe_part(value: str, fallback: str) -> str:
+            safe = ''.join(ch if (ch.isalnum() or ch in {'_', '-'}) else '_' for ch in (value or '').strip())
+            safe = safe.strip('_')
+            return safe or fallback
+
         if tpl_type == "multi_canvas":
             default_name = identity["id"]
         else:
+            image_part = _safe_part(str(self.controller.state.image_name or "image"), "image")
+            blueprint = _safe_part(str(identity.get("id") or "Canvas"), "Canvas")
             if template is None:
                 c = self.controller.state.canvas_resolved or {}
                 w = int(c.get("width", 0) or 0)
                 h = int(c.get("height", 0) or 0)
-                base = descriptor.get("preview", {}).get("base_name") or identity.get("id") or "Canvas"
-                default_name = f"{w}x{h}_{base}.pnt"
+                default_name = f"{image_part}_{w}x{h}_{blueprint}.pnt"
             else:
-                default_name = template["resolved"]["pnt"]
+                default_name = f"{image_part}_{blueprint}.pnt"
 
         path = filedialog.asksaveasfilename(
             initialdir=self._last_generate_dir,

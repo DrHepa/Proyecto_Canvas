@@ -453,6 +453,7 @@ json.dumps(set_template(${safeTemplateId}), ensure_ascii=False)
     const pyodide = await initPyodide()
     await ensureRuntimeReady(pyodide)
     const imageBuffer = asArrayBuffer((params as { imageBytes?: unknown } | undefined)?.imageBytes)
+    const imageName = asOptionalString((params as { imageName?: unknown } | undefined)?.imageName)
     const maxImageDim = asPositiveInt((params as { maxImageDim?: unknown } | undefined)?.maxImageDim, 4096)
     await assertImageDimensions(imageBuffer, maxImageDim)
     const imageBytes = new Uint8Array(imageBuffer)
@@ -467,7 +468,7 @@ import json, sys
 if '/assets/py_runtime' not in sys.path:
     sys.path.insert(0, '/assets/py_runtime')
 from pc_web_entry import set_image
-json.dumps(set_image(bytes(__pc_image_bytes)), ensure_ascii=False)
+json.dumps(set_image(bytes(__pc_image_bytes), image_name=${JSON.stringify(imageName)}), ensure_ascii=False)
 `
       )
     } finally {
@@ -561,9 +562,10 @@ _pc_preview_bytes
     await ensureRuntimeReady(pyodide)
     const writerMode = asWriterMode((params as { settings?: { writerMode?: unknown } } | undefined)?.settings?.writerMode)
     const dyesSettings = asDyesSettings((params as { settings?: unknown } | undefined)?.settings)
-    const safeSettings = JSON.stringify({ ...dyesSettings, writerMode })
+    const imageName = asOptionalString((params as { settings?: { imageName?: unknown } } | undefined)?.settings?.imageName)
+    const safeSettings = JSON.stringify({ ...dyesSettings, writerMode, imageName })
 
-    const pntBytes = await runPythonBytes(
+    const outputBytes = await runPythonBytes(
       pyodide,
       `
 import json, sys
@@ -575,10 +577,17 @@ generate_pnt(settings=_pc_settings)
 `
     )
 
+    const isZip = outputBytes.byteLength >= 4
+      && outputBytes[0] === 0x50
+      && outputBytes[1] === 0x4b
+      && outputBytes[2] === 0x03
+      && outputBytes[3] === 0x04
+
     return {
-      byteLength: pntBytes.byteLength,
-      pntBytes: pntBytes.buffer.slice(pntBytes.byteOffset, pntBytes.byteOffset + pntBytes.byteLength),
-      writerMode
+      byteLength: outputBytes.byteLength,
+      outputBytes: outputBytes.buffer.slice(outputBytes.byteOffset, outputBytes.byteOffset + outputBytes.byteLength),
+      writerMode,
+      outputKind: isZip ? 'zip' : 'pnt'
     }
   },
   'pc.calculateBestColors': async (params) => {
