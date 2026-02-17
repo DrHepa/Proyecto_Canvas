@@ -287,3 +287,36 @@ fieldset {
     transform: rotate(360deg);
   }
 }
+
+.advanced-toggle {
+  width: 100%;
+  text-align: left;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.advanced-panel {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.65rem;
+  border: 1px solid #334155;
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.advanced-panel__fieldset {
+  margin: 0;
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.advanced-panel__fieldset details {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.advanced-panel__diag-toggle {
+  width: fit-content;
+}
+
+.advanced-panel__diagnostics {
+  margin-top: 0.5rem;
+}

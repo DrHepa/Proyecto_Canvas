@@ -6,11 +6,13 @@ import BorderPanel from './components/BorderPanel'
 import CanvasLayoutPanel, { CanvasLayoutInfo, CanvasRequest } from './components/CanvasLayoutPanel'
 import CanvasSelector, { CanvasTemplateInfo } from './components/CanvasSelector'
 import ImageInput from './components/ImageInput'
-import ExternalLibraryPanel, { ExternalPntEntry } from './components/ExternalLibraryPanel'
+import { ExternalPntEntry } from './components/ExternalLibraryPanel'
+import AdvancedPanel from './components/AdvancedPanel'
 import PreviewPane from './components/PreviewPane'
 import { useI18n } from './i18n/I18nProvider'
 import { appStateReducer, initialAppState } from './state/store'
 import { ImageMeta, TemplateCategory, WriterMode } from './state/types'
+import { loadPrefs, savePrefs } from './hooks/usePrefs'
 
 type PcListTemplatesResult = {
   count: number
@@ -110,6 +112,14 @@ function parsePositiveInt(value: string, fallback: number): number {
   return intValue > 0 ? intValue : fallback
 }
 
+
+function parseTemplateCategory(value: string | undefined): TemplateCategory {
+  if (value === 'structures' || value === 'dinos' || value === 'humans' || value === 'other' || value === 'all') {
+    return value
+  }
+  return 'all'
+}
+
 function sanitizeFileNamePart(value: string): string {
   return value
     .trim()
@@ -120,9 +130,16 @@ function sanitizeFileNamePart(value: string): string {
 
 function App() {
   const { locale, setLocale, t, ready } = useI18n()
+  const prefs = useMemo(loadPrefs, [])
   const client = useMemo(() => new PyWorkerClient(), [])
-  const [state, dispatch] = useReducer(appStateReducer, initialAppState)
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [state, dispatch] = useReducer(appStateReducer, {
+    ...initialAppState,
+    selected_template_id: prefs.lastTemplateId ?? initialAppState.selected_template_id,
+    selected_template_category: parseTemplateCategory(prefs.lastCanvasCategory),
+    preview_mode: prefs.previewMode ?? initialAppState.preview_mode,
+    show_game_object: prefs.showGameObject ?? initialAppState.show_game_object
+  })
+  const [showAdvanced, setShowAdvanced] = useState(prefs.advancedOpen ?? false)
 
   const [result, setResult] = useState<string>('')
   const [loading, setLoading] = useState(false)
@@ -140,8 +157,8 @@ function App() {
   const [bestColors, setBestColors] = useState(0)
   const [availableFrameImages, setAvailableFrameImages] = useState<string[]>([])
   const [canvasLayout, setCanvasLayout] = useState<CanvasLayoutInfo | null>(null)
-  const [maxImageDim, setMaxImageDim] = useState(DEFAULT_MAX_IMAGE_DIM)
-  const [previewMaxDim, setPreviewMaxDim] = useState(DEFAULT_PREVIEW_MAX_DIM)
+  const [maxImageDim, setMaxImageDim] = useState(prefs.maxImageDim ?? DEFAULT_MAX_IMAGE_DIM)
+  const [previewMaxDim, setPreviewMaxDim] = useState(prefs.previewMaxDim ?? DEFAULT_PREVIEW_MAX_DIM)
   const [busyTask, setBusyTask] = useState<string | null>(null)
   const [lastOpTimeMs, setLastOpTimeMs] = useState<number | null>(null)
   const [engineStatus, setEngineStatus] = useState<EngineBootstrapState>('loading')
@@ -150,6 +167,8 @@ function App() {
   const [externalEntries, setExternalEntries] = useState<ExternalPntEntry[]>([])
   const [selectedExternalPath, setSelectedExternalPath] = useState<string | null>(null)
   const [folderPickerSupported, setFolderPickerSupported] = useState(false)
+  const pendingTemplateIdRef = useRef<string | null>(prefs.lastTemplateId ?? null)
+  const initialPrefsAppliedRef = useRef(false)
   const previewCacheRef = useRef<Map<string, string>>(new Map())
   const currentBlobUrlRef = useRef<string | null>(null)
   const pendingPreviewQualityRef = useRef<'fast' | 'final'>('final')
@@ -177,6 +196,18 @@ function App() {
   useEffect(() => {
     setFolderPickerSupported(typeof document !== 'undefined' && 'webkitdirectory' in document.createElement('input'))
   }, [])
+
+  useEffect(() => {
+    if (initialPrefsAppliedRef.current) {
+      return
+    }
+
+    if (prefs.lang && prefs.lang !== locale) {
+      setLocale(prefs.lang as 'es' | 'en' | 'ru' | 'zh')
+    }
+
+    initialPrefsAppliedRef.current = true
+  }, [locale, prefs.lang, setLocale])
 
   useEffect(() => {
     const prevent = (event: DragEvent) => {
@@ -227,6 +258,34 @@ function App() {
   }
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      savePrefs({
+        lang: locale,
+        advancedOpen: showAdvanced,
+        previewMode: state.preview_mode,
+        showGameObject: state.show_game_object,
+        previewMaxDim,
+        maxImageDim,
+        lastCanvasCategory: state.selected_template_category,
+        lastTemplateId: state.selected_template_id || undefined
+      })
+    }, 200)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [
+    locale,
+    maxImageDim,
+    previewMaxDim,
+    showAdvanced,
+    state.preview_mode,
+    state.selected_template_category,
+    state.selected_template_id,
+    state.show_game_object
+  ])
+
+  useEffect(() => {
     let cancelled = false
 
     const bootstrapApp = async () => {
@@ -249,9 +308,14 @@ function App() {
         }
 
         const defaultTemplate = templatesResponse.templates[0]?.id ?? ''
+        const nextCategory = parseTemplateCategory(prefs.lastCanvasCategory)
+        const preferredTemplateId = pendingTemplateIdRef.current ?? ''
+        const restoredTemplateId = pickTemplateForCategory(nextCategory, templatesResponse.templates, preferredTemplateId)
+        const nextTemplateId = restoredTemplateId || defaultTemplate
+
         setTemplates(templatesResponse.templates)
-        dispatch({ type: 'setSelectedTemplateCategory', payload: 'all' })
-        dispatch({ type: 'setSelectedTemplateId', payload: defaultTemplate })
+        dispatch({ type: 'setSelectedTemplateCategory', payload: nextCategory })
+        dispatch({ type: 'setSelectedTemplateId', payload: nextTemplateId })
 
         const dyesResponse: PcListDyesResult = await client.call('pc.listDyes', undefined, {
           timeoutMs: 60_000
@@ -279,8 +343,9 @@ function App() {
           }
         })
 
-        if (defaultTemplate) {
-          await handleSetTemplate(defaultTemplate)
+        if (nextTemplateId) {
+          await handleSetTemplate(nextTemplateId)
+          pendingTemplateIdRef.current = null
         }
 
         if (!cancelled) {
@@ -887,7 +952,7 @@ function App() {
                     checked={state.show_game_object}
                     onChange={(event) => dispatch({ type: 'setShowGameObject', payload: event.target.checked })}
                   />
-                  show_game_object ({state.show_game_object ? 'on' : 'off'})
+                  {t('chk.show_game_object')} ({state.show_game_object ? 'on' : 'off'})
                 </label>
               </fieldset>
 
@@ -923,56 +988,39 @@ function App() {
                 }}
               />
 
-              <label className="show-advanced">
-                <input type="checkbox" checked={showAdvanced} onChange={(event) => setShowAdvanced(event.target.checked)} />
-                Show advanced
-              </label>
+              <button
+                className="advanced-toggle"
+                type="button"
+                onClick={() => setShowAdvanced((value) => !value)}
+                aria-expanded={showAdvanced}
+              >
+                {t('panel.advanced')}
+              </button>
 
               {showAdvanced ? (
-                <>
-                  <fieldset disabled={loading}>
-                    <legend>Performance / Limits</legend>
-                    <label>
-                      max_image_dim
-                      <input
-                        type="number"
-                        min={256}
-                        max={16384}
-                        step={64}
-                        value={maxImageDim}
-                        onChange={(event) => setMaxImageDim(parsePositiveInt(event.target.value, DEFAULT_MAX_IMAGE_DIM))}
-                      />
-                    </label>
-                    <label>
-                      preview_max_dim
-                      <input
-                        type="number"
-                        min={128}
-                        max={8192}
-                        step={64}
-                        value={previewMaxDim}
-                        onChange={(event) => setPreviewMaxDim(parsePositiveInt(event.target.value, DEFAULT_PREVIEW_MAX_DIM))}
-                      />
-                    </label>
-                  </fieldset>
-
-                  <ExternalLibraryPanel
-                    entries={externalEntries}
-                    selectedPath={selectedExternalPath}
-                    disabled={loading}
-                    folderPickerSupported={folderPickerSupported}
-                    onUploadFiles={(files) => {
-                      void ingestExternalFiles(files)
-                    }}
-                    onPickFolder={(files) => {
-                      void ingestExternalFiles(files)
-                    }}
-                    onSelectPath={setSelectedExternalPath}
-                    onUseForGenerate={() => {
-                      void handleUseExternal()
-                    }}
-                  />
-                </>
+                <AdvancedPanel
+                  disabled={loading}
+                  maxImageDim={maxImageDim}
+                  previewMaxDim={previewMaxDim}
+                  onMaxImageDimChange={(nextValue) => setMaxImageDim(parsePositiveInt(String(nextValue), DEFAULT_MAX_IMAGE_DIM))}
+                  onPreviewMaxDimChange={(nextValue) => setPreviewMaxDim(parsePositiveInt(String(nextValue), DEFAULT_PREVIEW_MAX_DIM))}
+                  externalEntries={externalEntries}
+                  selectedExternalPath={selectedExternalPath}
+                  folderPickerSupported={folderPickerSupported}
+                  onUploadFiles={(files) => {
+                    void ingestExternalFiles(files)
+                  }}
+                  onPickFolder={(files) => {
+                    void ingestExternalFiles(files)
+                  }}
+                  onSelectPath={setSelectedExternalPath}
+                  onUseForGenerate={() => {
+                    void handleUseExternal()
+                  }}
+                  diagnostics={(
+                    <p className="status-line">{statusLine}</p>
+                  )}
+                />
               ) : null}
 
               <div className="actions-grid" role="group" aria-label="generate-actions">
