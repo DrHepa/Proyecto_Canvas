@@ -132,6 +132,18 @@ fieldset {
   gap: 0.5rem;
 }
 
+.previewModeFieldset input[type='radio'],
+.previewModeFieldset input[type='checkbox'] {
+  margin: 0;
+}
+
+.previewModeFieldset .row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 :focus-visible {
   outline: 2px solid #38bdf8;
   outline-offset: 2px;
