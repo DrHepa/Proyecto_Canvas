@@ -26,6 +26,8 @@ type DyesSettings = {
   previewMaxDim?: number
   preview_quality?: 'fast' | 'final'
   show_game_object?: boolean
+  preview_mode?: 'visual' | 'ark_simulation'
+  writerMode?: 'legacy_copy' | 'raster20' | 'preserve_source'
 }
 
 type RpcMethodMap = {
@@ -180,6 +182,26 @@ type RpcMethodMap = {
     }
   }
 
+
+
+  'pc.setSettings': {
+    params: {
+      settings?: DyesSettings
+    }
+    result: {
+      ok: boolean
+      applied: boolean
+    }
+  }
+  'pc.calculateBestColors': {
+    params: {
+      n: number
+      settings?: DyesSettings
+    }
+    result: {
+      enabledDyes: number[]
+    }
+  }
 
   'pc.renderPreview': {
     params: {

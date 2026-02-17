@@ -119,6 +119,7 @@ function App() {
   const [originalImageName, setOriginalImageName] = useState('')
   const [availableDyes, setAvailableDyes] = useState<DyeInfo[]>([])
   const [useAllDyes, setUseAllDyes] = useState(true)
+  const [lastManualEnabledDyes, setLastManualEnabledDyes] = useState<Set<number>>(new Set<number>())
   const [bestColors, setBestColors] = useState(0)
   const [availableFrameImages, setAvailableFrameImages] = useState<string[]>([])
   const [canvasLayout, setCanvasLayout] = useState<CanvasLayoutInfo | null>(null)
@@ -229,7 +230,9 @@ function App() {
           return
         }
         setAvailableDyes(dyesResponse.dyes)
-        dispatch({ type: 'setEnabledDyes', payload: new Set(dyesResponse.dyes.map((dye) => dye.id)) })
+        const allDyes = new Set(dyesResponse.dyes.map((dye) => dye.id))
+        dispatch({ type: 'setEnabledDyes', payload: allDyes })
+        setLastManualEnabledDyes(new Set(allDyes))
 
         const frameResponse: PcListFrameImagesResult = await client.call('pc.listFrameImages', undefined, {
           timeoutMs: 60_000
@@ -338,6 +341,78 @@ function App() {
     }
   }
 
+  const getAllDyeIds = () => new Set(availableDyes.map((dye) => dye.id))
+
+  const normalizeManualSelection = (): Set<number> => {
+    if (lastManualEnabledDyes.size > 0) {
+      return new Set(lastManualEnabledDyes)
+    }
+    return getAllDyeIds()
+  }
+
+  const handleUseAllDyesChange = (nextUseAll: boolean) => {
+    if (nextUseAll) {
+      setUseAllDyes(true)
+      return
+    }
+
+    const restored = normalizeManualSelection()
+    setUseAllDyes(false)
+    dispatch({ type: 'setEnabledDyes', payload: restored })
+    setLastManualEnabledDyes(new Set(restored))
+  }
+
+  const handleToggleSwatch = (dyeId: number) => {
+    let manual = useAllDyes ? normalizeManualSelection() : new Set(state.enabled_dyes)
+    if (useAllDyes) {
+      setUseAllDyes(false)
+    }
+
+    if (manual.has(dyeId)) {
+      manual.delete(dyeId)
+    } else {
+      manual.add(dyeId)
+    }
+
+    dispatch({ type: 'setEnabledDyes', payload: manual })
+    setLastManualEnabledDyes(new Set(manual))
+  }
+
+  const handleSetAllVisible = (enabled: boolean) => {
+    if (useAllDyes) {
+      setUseAllDyes(false)
+    }
+
+    const nextSelection = enabled ? getAllDyeIds() : new Set<number>()
+    dispatch({ type: 'setEnabledDyes', payload: nextSelection })
+    setLastManualEnabledDyes(new Set(nextSelection))
+  }
+
+  const buildPcSettings = (
+    quality?: 'fast' | 'final',
+    includeWriterMode?: WriterMode
+  ) => ({
+    useAllDyes,
+    enabledDyes: [...state.enabled_dyes],
+    bestColors,
+    ditheringConfig: state.dithering_config,
+    borderConfig: state.border_config,
+    canvasRequest: state.canvas_request,
+    previewMaxDim,
+    preview_quality: quality,
+    show_game_object: state.show_game_object,
+    preview_mode: state.preview_mode,
+    writerMode: includeWriterMode
+  })
+
+  const syncPcSettings = async (quality?: 'fast' | 'final', writerMode?: WriterMode) => {
+    await client.call('pc.setSettings', {
+      settings: buildPcSettings(quality, writerMode)
+    }, {
+      timeoutMs: 60_000
+    })
+  }
+
   const handleCanvasRequestChange = async (nextRequest: CanvasRequest | null) => {
     dispatch({ type: 'setCanvasRequest', payload: nextRequest })
 
@@ -376,19 +451,10 @@ function App() {
     setIsRenderingPreview(true)
 
     try {
+      await syncPcSettings(quality)
       const response: RenderPreviewResult = await client.callLatest('pc.renderPreview', {
         mode: state.preview_mode,
-        settings: {
-          useAllDyes,
-          enabledDyes: [...state.enabled_dyes],
-          bestColors,
-          ditheringConfig: state.dithering_config,
-          borderConfig: state.border_config,
-          canvasRequest: state.canvas_request,
-          previewMaxDim,
-          preview_quality: quality,
-          show_game_object: state.show_game_object
-        }
+        settings: buildPcSettings(quality)
       }, `preview-render-${quality}`, {
         timeoutMs: 120_000
       })
@@ -448,15 +514,11 @@ function App() {
   const handleGeneratePnt = async () => {
     try {
       const response: GeneratePntResult = await runWithTiming('Generating .pnt…', async () => {
+        await syncPcSettings(undefined, 'raster20')
         return client.call('pc.generatePnt', {
           settings: {
-            writerMode: 'raster20',
-            useAllDyes,
-            enabledDyes: [...state.enabled_dyes],
-            bestColors,
-            ditheringConfig: state.dithering_config,
-            borderConfig: state.border_config,
-            canvasRequest: state.canvas_request
+            ...buildPcSettings(undefined, 'raster20'),
+            writerMode: 'raster20'
           }
         }, {
           timeoutMs: 120_000
@@ -610,6 +672,40 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, previewDepsHash])
 
+  useEffect(() => {
+    if (engineStatus !== 'ready') {
+      return
+    }
+    void syncPcSettings().catch(() => {
+      // Best effort sync to keep runtime state aligned with UI.
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewDepsHash, engineStatus])
+
+  const handleCalculateBestColors = async () => {
+    if (!state.image_meta || !state.selected_template_id) {
+      return
+    }
+
+    try {
+      const response: { enabledDyes: number[] } = await runWithTiming('Calculating best dyes…', async () => {
+        await syncPcSettings()
+        return client.call('pc.calculateBestColors', {
+          n: bestColors,
+          settings: buildPcSettings()
+        }, { timeoutMs: 120_000 })
+      })
+
+      const selected = new Set(response.enabledDyes)
+      setUseAllDyes(false)
+      dispatch({ type: 'setEnabledDyes', payload: selected })
+      setLastManualEnabledDyes(new Set(selected))
+      setResult(`Best dyes calculated: ${selected.size}`)
+    } catch (error) {
+      handleRpcError(error)
+    }
+  }
+
 
   return (
     <main className="app-shell">
@@ -717,9 +813,11 @@ function App() {
                 enabledDyes={state.enabled_dyes}
                 bestColors={bestColors}
                 disabled={loading}
-                onUseAllDyesChange={setUseAllDyes}
-                onEnabledDyesChange={(value) => dispatch({ type: 'setEnabledDyes', payload: value })}
+                onUseAllDyesChange={handleUseAllDyesChange}
+                onToggleSwatch={handleToggleSwatch}
+                onSetAllVisible={handleSetAllVisible}
                 onBestColorsChange={setBestColors}
+                onCalculateBestColors={handleCalculateBestColors}
               />
 
               <BorderPanel

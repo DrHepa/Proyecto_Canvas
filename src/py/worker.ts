@@ -150,6 +150,8 @@ type DyesSettings = {
   previewMaxDim?: number
   preview_quality?: 'fast' | 'final'
   show_game_object: boolean
+  preview_mode?: PreviewMode
+  writerMode?: WriterMode
 }
 
 type ExternalPntEntry = {
@@ -490,6 +492,24 @@ json.dumps(set_canvas_request(_pc_canvas_request), ensure_ascii=False)
 `
     )
   },
+  'pc.setSettings': async (params) => {
+    const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
+    const settings = asDyesSettings((params as { settings?: unknown } | undefined)?.settings)
+    const safeSettings = JSON.stringify(settings)
+
+    return runPythonJson(
+      pyodide,
+      `
+import json, sys
+if '/assets/py_runtime' not in sys.path:
+    sys.path.insert(0, '/assets/py_runtime')
+from pc_web_entry import set_settings
+_pc_settings = json.loads(${JSON.stringify(safeSettings)})
+json.dumps(set_settings(_pc_settings), ensure_ascii=False)
+`
+    )
+  },
   'pc.renderPreview': async (params) => {
     const pyodide = await initPyodide()
     await ensureRuntimeReady(pyodide)
@@ -560,6 +580,25 @@ generate_pnt(settings=_pc_settings)
       pntBytes: pntBytes.buffer.slice(pntBytes.byteOffset, pntBytes.byteOffset + pntBytes.byteLength),
       writerMode
     }
+  },
+  'pc.calculateBestColors': async (params) => {
+    const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
+    const n = asNonNegativeInt((params as { n?: unknown } | undefined)?.n, 0)
+    const settings = asDyesSettings((params as { settings?: unknown } | undefined)?.settings)
+    const safeSettings = JSON.stringify(settings)
+
+    return runPythonJson(
+      pyodide,
+      `
+import json, sys
+if '/assets/py_runtime' not in sys.path:
+    sys.path.insert(0, '/assets/py_runtime')
+from pc_web_entry import calculate_best_colors
+_pc_settings = json.loads(${JSON.stringify(safeSettings)})
+json.dumps({'enabledDyes': calculate_best_colors(${n}, settings=_pc_settings)}, ensure_ascii=False)
+`
+    )
   },
   'userlib.reset': async () => {
     const pyodide = await initPyodide()
@@ -896,6 +935,8 @@ function asDyesSettings(value: unknown): DyesSettings {
     previewMaxDim?: unknown
     preview_quality?: unknown
     show_game_object?: unknown
+    preview_mode?: unknown
+    writerMode?: unknown
   }
 
   const useAllDyes = raw.useAllDyes === undefined ? true : Boolean(raw.useAllDyes)
@@ -915,7 +956,9 @@ function asDyesSettings(value: unknown): DyesSettings {
     canvasRequest: asCanvasRequest(raw.canvasRequest),
     previewMaxDim: asPositiveInt(raw.previewMaxDim, 0) || undefined,
     preview_quality: raw.preview_quality === 'fast' ? 'fast' : 'final',
-    show_game_object: asBoolean(raw.show_game_object, false)
+    show_game_object: asBoolean(raw.show_game_object, false),
+    preview_mode: raw.preview_mode === 'ark_simulation' ? 'ark_simulation' : 'visual',
+    writerMode: asWriterMode(raw.writerMode)
   }
 }
 

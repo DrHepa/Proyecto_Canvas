@@ -15,8 +15,10 @@ type DyesPanelProps = {
   bestColors: number
   disabled?: boolean
   onUseAllDyesChange: (value: boolean) => void
-  onEnabledDyesChange: (value: Set<number>) => void
+  onToggleSwatch: (dyeId: number) => void
+  onSetAllVisible: (enabled: boolean) => void
   onBestColorsChange: (value: number) => void
+  onCalculateBestColors: () => void
 }
 
 function formatSwatchColor(dye: DyeInfo): string {
@@ -39,37 +41,20 @@ export function DyesPanel({
   bestColors,
   disabled = false,
   onUseAllDyesChange,
-  onEnabledDyesChange,
-  onBestColorsChange
+  onToggleSwatch,
+  onSetAllVisible,
+  onBestColorsChange,
+  onCalculateBestColors
 }: DyesPanelProps) {
   const { t } = useI18n()
   const maxBestColors = Math.max(0, dyes.length)
   const selectedCount = useMemo(() => enabledDyes.size, [enabledDyes])
 
-  const toggleDye = (dyeId: number) => {
-    const next = new Set(enabledDyes)
-    if (next.has(dyeId)) {
-      next.delete(dyeId)
-    } else {
-      next.add(dyeId)
-    }
-    onEnabledDyesChange(next)
-  }
-
   const handleSwatchKeyDown = (event: KeyboardEvent<HTMLButtonElement>, dyeId: number) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
-      toggleDye(dyeId)
+      onToggleSwatch(dyeId)
     }
-  }
-
-  const setAllVisible = (enabled: boolean) => {
-    if (enabled) {
-      onEnabledDyesChange(new Set(dyes.map((dye) => dye.id)))
-      return
-    }
-
-    onEnabledDyesChange(new Set())
   }
 
   const clampedBestColors = Math.min(Math.max(0, bestColors), maxBestColors)
@@ -100,16 +85,16 @@ export function DyesPanel({
             aria-label={t('label.best_colors')}
             onChange={(event) => onBestColorsChange(Math.min(Math.max(Number(event.target.value) || 0, 0), maxBestColors))}
           />
-          <button type="button" onClick={() => onBestColorsChange(clampedBestColors)} aria-pressed="false">
+          <button type="button" onClick={onCalculateBestColors} aria-pressed="false">
             {t('btn.calculate')}
           </button>
         </div>
 
         <div className="dyeControlsRow">
-          <button type="button" onClick={() => setAllVisible(true)} aria-pressed="false">
+          <button type="button" onClick={() => onSetAllVisible(true)} aria-pressed="false">
             {t('btn.activate_visibles')}
           </button>
-          <button type="button" onClick={() => setAllVisible(false)} aria-pressed="false">
+          <button type="button" onClick={() => onSetAllVisible(false)} aria-pressed="false">
             {t('btn.deactivate_visibles')}
           </button>
         </div>
@@ -119,7 +104,7 @@ export function DyesPanel({
         {t('web.available_dyes')}: {dyes.length} · {t('web.selected_dyes')}: {useAllDyes ? t('web.all') : selectedCount}
       </p>
 
-      <fieldset disabled={disabled || useAllDyes}>
+      <fieldset disabled={disabled}>
         <legend>{t('web.enabled_dyes')}</legend>
         <div className="dyeGrid">
           {dyes.map((dye) => {
@@ -131,7 +116,7 @@ export function DyesPanel({
                 type="button"
                 className={`swatch ${checked ? 'swatchSelected' : ''}`}
                 style={{ backgroundColor: formatSwatchColor(dye) }}
-                onClick={() => toggleDye(dye.id)}
+                onClick={() => onToggleSwatch(dye.id)}
                 onKeyDown={(event) => handleSwatchKeyDown(event, dye.id)}
                 aria-label={tooltip}
                 aria-pressed={checked}
