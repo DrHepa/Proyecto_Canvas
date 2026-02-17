@@ -1,4 +1,5 @@
 import { useI18n } from '../i18n/I18nProvider'
+import { useSliderCommit } from '../hooks/useSliderCommit'
 
 export type BorderStyle = 'none' | 'image'
 
@@ -12,7 +13,7 @@ type BorderPanelProps = {
   config: BorderConfig
   frameImages: string[]
   disabled?: boolean
-  onChange: (value: BorderConfig) => void
+  onChange: (value: BorderConfig, options?: { previewQuality: 'fast' | 'final' }) => void
 }
 
 function clampSize(value: number): number {
@@ -25,6 +26,30 @@ function clampSize(value: number): number {
 export function BorderPanel({ config, frameImages, disabled = false, onChange }: BorderPanelProps) {
   const { t } = useI18n()
   const normalizedSize = clampSize(config.size)
+  const slider = useSliderCommit(normalizedSize, {
+    throttleMs: 200,
+    idleFinalMs: 650,
+    onFast: (value) => {
+      onChange(
+        {
+          style: config.style,
+          size: clampSize(value),
+          frame_image: config.frame_image
+        },
+        { previewQuality: 'fast' }
+      )
+    },
+    onFinal: (value) => {
+      onChange(
+        {
+          style: config.style,
+          size: clampSize(value),
+          frame_image: config.frame_image
+        },
+        { previewQuality: 'final' }
+      )
+    }
+  })
   const hasFrameImages = frameImages.length > 0
   const frameImageValue = config.frame_image && frameImages.includes(config.frame_image) ? config.frame_image : ''
 
@@ -37,14 +62,14 @@ export function BorderPanel({ config, frameImages, disabled = false, onChange }:
           <select
             aria-label={t('web.aria.border_style')}
             value={config.style}
-            onChange={(event) => {
-              const nextStyle = event.target.value === 'image' ? 'image' : 'none'
-              onChange({
-                style: nextStyle,
-                size: normalizedSize,
-                frame_image: nextStyle === 'image' ? config.frame_image : null
-              })
-            }}
+              onChange={(event) => {
+                const nextStyle = event.target.value === 'image' ? 'image' : 'none'
+                onChange({
+                  style: nextStyle,
+                  size: normalizedSize,
+                  frame_image: nextStyle === 'image' ? config.frame_image : null
+                }, { previewQuality: 'final' })
+              }}
           >
             <option value="none">none</option>
             <option value="image">image</option>
@@ -59,15 +84,16 @@ export function BorderPanel({ config, frameImages, disabled = false, onChange }:
               min={0}
               max={256}
               step={1}
-              value={normalizedSize}
+              value={slider.value}
               aria-label={t('web.aria.border_size')}
-              onChange={(event) => {
-                onChange({
-                  style: config.style,
-                  size: clampSize(Number(event.target.value)),
-                  frame_image: config.frame_image
-                })
-              }}
+              onChange={slider.onChange}
+              onPointerDown={slider.onPointerDown}
+              onPointerUp={slider.onPointerUp}
+              onMouseDown={slider.onPointerDown}
+              onMouseUp={slider.onPointerUp}
+              onTouchStart={slider.onPointerDown}
+              onTouchEnd={slider.onPointerUp}
+              onBlur={slider.onBlur}
             />
           </label>
         </div>
@@ -85,7 +111,7 @@ export function BorderPanel({ config, frameImages, disabled = false, onChange }:
                   style: config.style,
                   size: normalizedSize,
                   frame_image: nextFrame
-                })
+                }, { previewQuality: 'final' })
               }}
             >
               <option value="">{hasFrameImages ? t('web.select_frame_image') : t('web.no_frame_images')}</option>

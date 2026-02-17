@@ -152,6 +152,7 @@ function App() {
   const [folderPickerSupported, setFolderPickerSupported] = useState(false)
   const previewCacheRef = useRef<Map<string, string>>(new Map())
   const currentBlobUrlRef = useRef<string | null>(null)
+  const pendingPreviewQualityRef = useRef<'fast' | 'final'>('final')
 
   useEffect(() => () => client.dispose(), [client])
 
@@ -743,18 +744,12 @@ function App() {
     previewGenerationRef.current += 1
     const generation = previewGenerationRef.current
     const previewKey = previewDepsHash
+    const quality = pendingPreviewQualityRef.current
+    pendingPreviewQualityRef.current = 'final'
 
-    const fastTimerId = window.setTimeout(() => {
-      void handleRenderPreview('fast', generation, previewKey)
-    }, 100)
-
-    const finalTimerId = window.setTimeout(() => {
-      void handleRenderPreview('final', generation, previewKey)
-    }, 800)
+    void handleRenderPreview(quality, generation, previewKey)
 
     return () => {
-      clearTimeout(fastTimerId)
-      clearTimeout(finalTimerId)
       client.cancelLatest('preview-render-fast')
       client.cancelLatest('preview-render-final')
     }
@@ -913,13 +908,19 @@ function App() {
                 config={state.border_config}
                 frameImages={availableFrameImages}
                 disabled={loading}
-                onChange={(value) => dispatch({ type: 'setBorderConfig', payload: value })}
+                onChange={(value, options) => {
+                  pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
+                  dispatch({ type: 'setBorderConfig', payload: value })
+                }}
               />
 
               <DitherPanel
                 config={state.dithering_config}
                 disabled={loading}
-                onChange={(value) => dispatch({ type: 'setDitheringConfig', payload: value })}
+                onChange={(value, options) => {
+                  pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
+                  dispatch({ type: 'setDitheringConfig', payload: value })
+                }}
               />
 
               <label className="show-advanced">
