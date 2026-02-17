@@ -37,6 +37,7 @@ PC_ENABLE_APC_DEBUG = os.environ.get('PC_ENABLE_APC_DEBUG', '0') == '1'
 class AppState:
     # Input
     image_original: Optional[Image.Image] = None
+    image_name: Optional[str] = None
 
     # Template selection / resolved
     template: Optional[dict] = None                 # resolved physical template (or abstract if selected)
@@ -174,8 +175,10 @@ class PreviewController:
     # Setters (state mutation is explicit and minimal)
     # ==================================================
 
-    def set_image(self, image: Optional[Image.Image]) -> None:
+    def set_image(self, image: Optional[Image.Image], image_name: Optional[str] = None) -> None:
         self.state.image_original = image
+        if image_name is not None:
+            self.state.image_name = str(image_name).strip() or None
         self._prepared_image_rgba = None
 
         self._image_rev += 1
@@ -1493,7 +1496,15 @@ class PreviewController:
             out_dir = out_dir.with_suffix("")
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        pattern = descriptor.get("naming", {}).get("pattern", "tile_r{row}_c{col}.pnt")
+        def _sanitize_name(value: str, *, fallback: str) -> str:
+            safe = ''.join(ch if (ch.isalnum() or ch in {'_', '-'}) else '_' for ch in (value or '').strip())
+            safe = safe.strip('_')
+            return safe or fallback
+
+        image_name = _sanitize_name(str(self.state.image_name or 'image'), fallback='image')
+        blueprint = _sanitize_name(str(self.state.selected_template_id or identity.get('id') or 'Canvas'), fallback='Canvas')
+
+        pattern = descriptor.get("naming", {}).get("pattern", "{image_name}({x})({y})_{blueprint}.pnt")
 
         requests: list[GenerationRequest] = []
         encode_visibility_mask = self._build_encode_visibility_mask(
@@ -1508,7 +1519,14 @@ class PreviewController:
                 x0 = col * canvas_w
                 sub_img = full_img[y0 : y0 + canvas_h, x0 : x0 + canvas_w, :].copy()
 
-                filename = pattern.format(row=row, col=col)
+                filename = pattern.format(
+                    row=row,
+                    col=col,
+                    x=col,
+                    y=row,
+                    image_name=image_name,
+                    blueprint=blueprint,
+                )
                 if not filename.lower().endswith(".pnt"):
                     filename += ".pnt"
 

@@ -172,6 +172,7 @@ type RpcMethodMap = {
   'pc.setImage': {
     params: {
       imageBytes: ArrayBuffer
+      imageName?: string
       maxImageDim?: number
     }
     result: {
@@ -219,11 +220,13 @@ type RpcMethodMap = {
     params: {
       settings?: {
         writerMode?: 'legacy_copy' | 'raster20' | 'preserve_source'
+        imageName?: string
       } & DyesSettings
     }
     result: {
       byteLength: number
-      pntBytes: ArrayBuffer
+      outputBytes: ArrayBuffer
+      outputKind: 'pnt' | 'zip'
       writerMode: 'legacy_copy' | 'raster20' | 'preserve_source'
     }
   }

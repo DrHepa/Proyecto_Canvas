@@ -719,7 +719,7 @@ def list_templates() -> list[dict[str, Any]]:
     return output
 
 
-def set_image(image_bytes: bytes) -> dict[str, Any]:
+def set_image(image_bytes: bytes, image_name: str | None = None) -> dict[str, Any]:
     from PIL import Image
 
     global _last_image_size
@@ -728,7 +728,7 @@ def set_image(image_bytes: bytes) -> dict[str, Any]:
     with Image.open(BytesIO(image_bytes)) as image:
         rgba = image.convert('RGBA')
 
-    controller.set_image(rgba)
+    controller.set_image(rgba, image_name=image_name)
 
     state = getattr(controller, 'state', None)
     if state is not None and hasattr(state, 'image_original'):
@@ -942,7 +942,24 @@ def render_preview(mode: str = 'visual', settings: dict[str, Any] | None = None)
         return out.getvalue()
 
 
+
+def _sanitize_file_part(value: Any, fallback: str) -> str:
+    raw = str(value or '').strip()
+    if '.' in raw:
+        raw = raw.rsplit('.', 1)[0]
+    safe = ''.join(ch if ch.isalnum() or ch in {'_', '-'} else '_' for ch in raw).strip('_')
+    return safe or fallback
+
+
+def _resolve_blueprint_name(state: Any) -> str:
+    descriptor = getattr(state, 'preview_descriptor', None) or getattr(state, 'template', None)
+    identity = descriptor.get('identity') if isinstance(descriptor, dict) else {}
+    return _sanitize_file_part(getattr(state, 'selected_template_id', None) or identity.get('id') or identity.get('label') or 'Canvas', 'Canvas')
+
 def generate_pnt(settings: dict[str, Any] | None = None) -> bytes:
+    import io
+    import zipfile
+
     controller = _get_controller()
     state = getattr(controller, 'state', None)
     if state is None:
@@ -959,31 +976,81 @@ def generate_pnt(settings: dict[str, Any] | None = None) -> bytes:
 
     controller.set_writer_mode(writer_mode)
 
-    target = Path('/tmp/output.pnt')
-    if target.exists():
-        target.unlink()
+    descriptor = getattr(state, 'preview_descriptor', None) or getattr(state, 'template', None)
+    identity = descriptor.get('identity') if isinstance(descriptor, dict) else {}
+    is_multi = identity.get('type') == 'multi_canvas'
 
     tabla_path = _ASSETS_ROOT / 'TablaDyes_v1.json'
     if not tabla_path.exists():
         raise FileNotFoundError(f'TablaDyes not found at: {tabla_path}')
 
-    controller.request_generation(output_path=target, tabla_dyes_path=tabla_path)
-    if not target.exists():
-        raise RuntimeError('generation did not produce output file')
+    image_part = _sanitize_file_part(settings_obj.get('imageName') or getattr(state, 'image_name', None) or 'image', 'image')
+    blueprint = _resolve_blueprint_name(state)
 
-    validation = validate_raster20(target)
-    if not validation.ok:
-        raise RuntimeError(f'generated .pnt failed validation: {validation.kind} | {validation.message}')
+    if not is_multi:
+        target = Path('/tmp/output.pnt')
+        if target.exists():
+            target.unlink()
 
-    pnt_info = peek_pnt_info(target)
-    if not bool(pnt_info.get('is_header20')):
-        raise RuntimeError('generated .pnt is not header20-compatible')
+        controller.request_generation(output_path=target, tabla_dyes_path=tabla_path)
+        if not target.exists():
+            raise RuntimeError('generation did not produce output file')
 
-    output_bytes = target.read_bytes()
-    if len(output_bytes) == 0:
-        raise RuntimeError('generated .pnt is empty')
+        validation = validate_raster20(target)
+        if not validation.ok:
+            raise RuntimeError(f'generated .pnt failed validation: {validation.kind} | {validation.message}')
 
-    return output_bytes
+        pnt_info = peek_pnt_info(target)
+        if not bool(pnt_info.get('is_header20')):
+            raise RuntimeError('generated .pnt is not header20-compatible')
+
+        output_bytes = target.read_bytes()
+        if len(output_bytes) == 0:
+            raise RuntimeError('generated .pnt is empty')
+        return output_bytes
+
+    out_dir = Path('/tmp/output_multi')
+    if out_dir.exists():
+        for existing in out_dir.glob('*.pnt'):
+            existing.unlink()
+    else:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    controller.requests_generation(output_path=out_dir, tabla_dyes_path=tabla_path)
+
+    rows = int((((descriptor or {}).get('multi_canvas') or {}).get('rows') or {}).get('default', 1) or 1)
+    cols = int((((descriptor or {}).get('multi_canvas') or {}).get('cols') or {}).get('default', 1) or 1)
+    req = getattr(state, 'canvas_request', None)
+    if isinstance(req, dict) and req.get('mode') == 'multi_canvas':
+        rows = int(req.get('rows', rows) or rows)
+        cols = int(req.get('cols', cols) or cols)
+
+    generated = sorted(out_dir.glob('*.pnt'))
+    expected = rows * cols
+    if len(generated) != expected:
+        raise RuntimeError(f'multi-canvas generation mismatch: expected {expected}, got {len(generated)}')
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        for index, source in enumerate(generated):
+            row = index // cols
+            col = index % cols
+            file_name = f'{image_part}({col})({row})_{blueprint}.pnt'
+
+            validation = validate_raster20(source)
+            if not validation.ok:
+                raise RuntimeError(f'generated .pnt failed validation: {validation.kind} | {validation.message}')
+
+            pnt_info = peek_pnt_info(source)
+            if not bool(pnt_info.get('is_header20')):
+                raise RuntimeError(f'generated .pnt is not header20-compatible: {source.name}')
+
+            zf.writestr(file_name, source.read_bytes())
+
+    payload = zip_buffer.getvalue()
+    if len(payload) == 0:
+        raise RuntimeError('generated .zip is empty')
+    return payload
 
 
 def _json_dumps(value: Any) -> str:

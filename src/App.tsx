@@ -71,7 +71,8 @@ type RenderPreviewResult = {
 
 type GeneratePntResult = {
   byteLength: number
-  pntBytes: ArrayBuffer
+  outputBytes: ArrayBuffer
+  outputKind: 'pnt' | 'zip'
   writerMode: WriterMode
 }
 
@@ -651,6 +652,7 @@ function App() {
           'pc.setImage',
           {
             imageBytes: image.bytes.slice().buffer as ArrayBuffer,
+            imageName: file.name,
             maxImageDim
           },
           { timeoutMs: 60_000 }
@@ -676,18 +678,21 @@ function App() {
         return client.call('pc.generatePnt', {
           settings: {
             ...buildPcSettings(undefined, 'raster20'),
-            writerMode: 'raster20'
+            writerMode: 'raster20',
+            imageName: originalImageName || 'image'
           }
         }, {
           timeoutMs: 120_000
         })
       })
 
-      const templatePart = sanitizeFileNamePart(state.selected_template_id || 'template')
-      const originalPart = sanitizeFileNamePart(originalImageName || 'image')
-      const outputFileName = `${templatePart}_${originalPart}.pnt`
+      const blueprintPart = sanitizeFileNamePart(state.selected_template_id || 'template')
+      const imagePart = sanitizeFileNamePart(originalImageName || 'image')
+      const outputFileName = response.outputKind === 'zip'
+        ? `${imagePart}_${blueprintPart}.zip`
+        : `${imagePart}_${blueprintPart}.pnt`
 
-      const blob = new Blob([response.pntBytes], { type: 'application/octet-stream' })
+      const blob = new Blob([response.outputBytes], { type: 'application/octet-stream' })
       const downloadUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = downloadUrl
