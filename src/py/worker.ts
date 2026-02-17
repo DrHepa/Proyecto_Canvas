@@ -1049,38 +1049,61 @@ function asPreviewReturnFormat(value: unknown): PreviewReturnFormat {
 function asRenderPreview2Payload(value: unknown): RenderPreview2Payload {
   const raw = (value ?? {}) as {
     settings_delta?: unknown
+    settingsDelta?: unknown
+    settings?: unknown
     preview_mode?: unknown
+    previewMode?: unknown
     preview_max_dim?: unknown
+    previewMaxDim?: unknown
     return_format?: unknown
+    returnFormat?: unknown
   }
 
+  const settingsDelta = raw.settings_delta ?? raw.settingsDelta ?? raw.settings
+
   return {
-    settings_delta: asDyesSettings(raw.settings_delta),
-    preview_mode: asPreviewMode(raw.preview_mode ?? 'visual'),
-    preview_max_dim: asPositiveInt(raw.preview_max_dim, 0),
-    return_format: asPreviewReturnFormat(raw.return_format)
+    settings_delta: asDyesSettings(settingsDelta),
+    preview_mode: asPreviewMode(raw.preview_mode ?? raw.previewMode ?? 'visual'),
+    preview_max_dim: asPositiveInt(raw.preview_max_dim ?? raw.previewMaxDim, 0),
+    return_format: asPreviewReturnFormat(raw.return_format ?? raw.returnFormat)
   }
 }
 
 function asDyesSettings(value: unknown): DyesSettings {
   const raw = (value ?? {}) as {
     useAllDyes?: unknown
+    use_all_dyes?: unknown
     enabledDyes?: unknown
+    enabled_dyes?: unknown
+    dyes?: unknown
     bestColors?: unknown
+    best_colors?: unknown
     ditheringConfig?: unknown
+    dithering_config?: unknown
+    dithering?: unknown
     borderConfig?: unknown
+    border_config?: unknown
+    border?: unknown
     canvasRequest?: unknown
+    canvas_request?: unknown
     previewMaxDim?: unknown
+    preview_max_dim?: unknown
     preview_quality?: unknown
     show_game_object?: unknown
+    showGameObject?: unknown
+    show_object?: unknown
     preview_mode?: unknown
+    previewMode?: unknown
     writerMode?: unknown
   }
 
-  const useAllDyes = raw.useAllDyes === undefined ? true : Boolean(raw.useAllDyes)
-  const bestColors = asNonNegativeInt(raw.bestColors, 0)
-  const enabledDyes = Array.isArray(raw.enabledDyes)
-    ? raw.enabledDyes
+  const dyesRaw = (raw.dyes && typeof raw.dyes === 'object') ? raw.dyes as { useAllDyes?: unknown; use_all_dyes?: unknown; enabledDyes?: unknown; enabled_dyes?: unknown } : undefined
+  const useAllDyesInput = raw.useAllDyes ?? raw.use_all_dyes ?? dyesRaw?.useAllDyes ?? dyesRaw?.use_all_dyes
+  const useAllDyes = useAllDyesInput === undefined ? true : Boolean(useAllDyesInput)
+  const bestColors = asNonNegativeInt(raw.bestColors ?? raw.best_colors, 0)
+  const enabledDyesSource = raw.enabledDyes ?? raw.enabled_dyes ?? dyesRaw?.enabledDyes ?? dyesRaw?.enabled_dyes
+  const enabledDyes = Array.isArray(enabledDyesSource)
+    ? enabledDyesSource
         .map((entry) => asNonNegativeInt(entry, -1))
         .filter((entry) => entry >= 0)
     : []
@@ -1089,13 +1112,13 @@ function asDyesSettings(value: unknown): DyesSettings {
     useAllDyes,
     enabledDyes,
     bestColors,
-    ditheringConfig: asDitheringConfig(raw.ditheringConfig),
-    borderConfig: asBorderConfig(raw.borderConfig),
-    canvasRequest: asCanvasRequest(raw.canvasRequest),
-    previewMaxDim: asPositiveInt(raw.previewMaxDim, 0) || undefined,
+    ditheringConfig: asDitheringConfig(raw.ditheringConfig ?? raw.dithering_config ?? raw.dithering),
+    borderConfig: asBorderConfig(raw.borderConfig ?? raw.border_config ?? raw.border),
+    canvasRequest: asCanvasRequest(raw.canvasRequest ?? raw.canvas_request),
+    previewMaxDim: asPositiveInt(raw.previewMaxDim ?? raw.preview_max_dim, 0) || undefined,
     preview_quality: raw.preview_quality === 'fast' ? 'fast' : 'final',
-    show_game_object: asBoolean(raw.show_game_object, false),
-    preview_mode: raw.preview_mode === 'ark_simulation' ? 'ark_simulation' : 'visual',
+    show_game_object: asBoolean(raw.show_game_object ?? raw.showGameObject ?? raw.show_object, false),
+    preview_mode: (raw.preview_mode ?? raw.previewMode) === 'ark_simulation' ? 'ark_simulation' : 'visual',
     writerMode: asWriterMode(raw.writerMode)
   }
 }
