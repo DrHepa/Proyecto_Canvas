@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { useI18n } from '../i18n/I18nProvider'
 import { ImageMeta } from '../state/types'
 
+const FAST_DRAW_THRESHOLD_PIXELS = 250_000
+
 type PaintArea = {
   offset_x: number
   offset_y: number
@@ -66,16 +68,58 @@ function PreviewPane({
       return
     }
 
-    const ctx = canvasRef.current.getContext('2d')
-    if (!ctx) {
-      return
+    let cancelled = false
+
+    const drawFastPreview = async () => {
+      const canvas = canvasRef.current
+      if (!canvas) {
+        return
+      }
+
+      canvas.width = fastPreviewRgba.w
+      canvas.height = fastPreviewRgba.h
+
+      const u8 = new Uint8ClampedArray(fastPreviewRgba.rgba)
+      const imageData = new ImageData(u8, fastPreviewRgba.w, fastPreviewRgba.h)
+      const pixels = fastPreviewRgba.w * fastPreviewRgba.h
+
+      if (pixels <= FAST_DRAW_THRESHOLD_PIXELS) {
+        const ctx = canvas.getContext('2d')
+        if (!ctx || cancelled) {
+          return
+        }
+        ctx.putImageData(imageData, 0, 0)
+        return
+      }
+
+      const bitmap = await createImageBitmap(imageData)
+      if (cancelled) {
+        bitmap.close()
+        return
+      }
+
+      const bitmapCtx = canvas.getContext('bitmaprenderer')
+      if (bitmapCtx) {
+        bitmapCtx.transferFromImageBitmap(bitmap)
+        return
+      }
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        bitmap.close()
+        return
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(bitmap, 0, 0)
+      bitmap.close()
     }
 
-    canvasRef.current.width = fastPreviewRgba.w
-    canvasRef.current.height = fastPreviewRgba.h
-    const u8 = new Uint8ClampedArray(fastPreviewRgba.rgba)
-    const imageData = new ImageData(u8, fastPreviewRgba.w, fastPreviewRgba.h)
-    ctx.putImageData(imageData, 0, 0)
+    void drawFastPreview()
+
+    return () => {
+      cancelled = true
+    }
   }, [fastPreviewRgba])
 
   return (
