@@ -85,7 +85,7 @@
   "btn.refine_user_mask": "Refinar máscara (pares)",
   "status.user_mask_refined": "Máscara refinada para {bp} → {out}",
   "err.user_mask_refine": "Error al refinar: {err}",
-  "web.app_subtitle": "Interfaz moderna React + TypeScript lista para flujos de Project Canvas.",
+  "web.app_subtitle": "Proyecto Canvas convierte imágenes en pinturas .pnt de ARK con plantillas, tintes, dithering y borde.",
   "web.loading_locales": "Cargando traducciones…",
   "web.quick_actions": "Acciones rápidas",
   "web.status_initializing_pyodide": "Inicializando Pyodide…",
@@ -150,5 +150,18 @@
   "panel.image.drop_here": "Suelta la imagen aquí (PNG/JPG/WebP)",
   "panel.image.drop_active": "Suelta para cargar la imagen",
   "panel.image.invalid_file": "Archivo inválido. Suelta una imagen PNG, JPG o WebP.",
-  "panel.image.single_file_only": "Suelta exactamente un archivo."
+  "panel.image.single_file_only": "Suelta exactamente un archivo.",
+  "panel.gui_style": "Estilo GUI",
+  "gui_style.reference": "Referencia",
+  "gui_style.studio": "Studio",
+  "gui_style.compact": "Compacto",
+  "gui_style.kiosk": "Kiosco",
+  "web.intro.title": "Proyecto Canvas",
+  "web.intro.body": "Prepara tu imagen y exporta archivos de pintura para ARK con plantillas y controles de generación.",
+  "web.intro.bullets.convert": "Convierte imágenes PNG/JPG/WebP a salida .pnt.",
+  "web.intro.bullets.templates": "Selecciona plantillas de canvas por categoría y layout.",
+  "web.intro.bullets.dyes": "Ajusta tintes, mejores colores y visibilidad antes de generar.",
+  "web.intro.bullets.border_dither": "Configura borde y dithering para calidad final.",
+  "web.intro.bullets.external": "Carga bibliotecas externas .pnt para reutilizar datos.",
+  "web.intro.enter": "Entrar"
 }

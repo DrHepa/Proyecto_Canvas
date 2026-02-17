@@ -95,5 +95,19 @@
   "panel.image.drop_here": "将图片拖到这里（PNG/JPG/WebP）",
   "panel.image.drop_active": "松开以上传图片",
   "panel.image.invalid_file": "文件无效。请拖入 PNG、JPG 或 WebP 图片。",
-  "panel.image.single_file_only": "请仅拖入一个文件。"
+  "panel.image.single_file_only": "请仅拖入一个文件。",
+  "panel.gui_style": "界面风格",
+  "gui_style.reference": "参考",
+  "gui_style.studio": "工作室",
+  "gui_style.compact": "紧凑",
+  "gui_style.kiosk": "展台",
+  "web.app_subtitle": "Proyecto Canvas 可将图片转换为 ARK .pnt 涂装，并支持模板、染料、抖动与边框工具。",
+  "web.intro.title": "Proyecto Canvas",
+  "web.intro.body": "准备你的图片，并使用模板与生成控制导出 ARK 涂装文件。",
+  "web.intro.bullets.convert": "将 PNG/JPG/WebP 图片转换为 .pnt 输出。",
+  "web.intro.bullets.templates": "按分类与布局选择画布模板。",
+  "web.intro.bullets.dyes": "在生成前调整染料、最佳颜色和可见项。",
+  "web.intro.bullets.border_dither": "调整边框样式和抖动效果以获得最终质量。",
+  "web.intro.bullets.external": "加载外部 .pnt 库复用数据。",
+  "web.intro.enter": "进入"
 }

@@ -1,5 +1,7 @@
 export type Prefs = {
   lang?: string
+  guiStyle?: string
+  introDismissed?: boolean
   advancedOpen?: boolean
   previewMode?: 'visual' | 'ark_simulation'
   showGameObject?: boolean
