@@ -218,6 +218,29 @@ type RpcMethodMap = {
       pngBytes: ArrayBuffer
     }
   }
+  'pc.renderPreview2': {
+    params: {
+      payload: {
+        settings_delta?: DyesSettings
+        preview_mode: 'visual' | 'ark_simulation'
+        preview_max_dim?: number
+        return_format?: 'png' | 'rgba'
+      }
+    }
+    result:
+      | {
+          kind: 'png'
+          png: ArrayBuffer
+          byteLength: number
+        }
+      | {
+          kind: 'rgba'
+          w: number
+          h: number
+          rgba: ArrayBuffer
+          byteLength: number
+        }
+  }
   'pc.generatePnt': {
     params: {
       settings?: {

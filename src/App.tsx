@@ -64,10 +64,16 @@ type SetCanvasRequestResult = {
 }
 
 type RenderPreviewResult = {
+  kind: 'png' | 'rgba'
   mode: 'visual' | 'ark_simulation'
-  previewQuality: 'fast' | 'final'
   byteLength: number
-  pngBytes: ArrayBuffer
+  previewQuality: 'fast' | 'final'
+}
+
+type FastRgbaPreview = {
+  w: number
+  h: number
+  rgba: ArrayBuffer
 }
 
 type GeneratePntResult = {
@@ -87,6 +93,7 @@ type EngineBootstrapState = 'loading' | 'ready' | 'error'
 
 const DEFAULT_MAX_IMAGE_DIM = 4096
 const DEFAULT_PREVIEW_MAX_DIM = 1024
+const FAST_PREVIEW_CAP = 768
 const PREVIEW_CACHE_LIMIT = 30
 const HIGH_PREVIEW_WARNING_DIM = 1536
 const PERF_HISTORY_LIMIT = 60
@@ -158,6 +165,7 @@ function App() {
   const [templateSearchText, setTemplateSearchText] = useState('')
   const [resolvedCanvas, setResolvedCanvas] = useState<SetTemplateResult['canvas_resolved'] | null>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
+  const [fastPreviewRgba, setFastPreviewRgba] = useState<FastRgbaPreview | null>(null)
   const [previewMeta, setPreviewMeta] = useState<RenderPreviewResult | null>(null)
   const [isRenderingPreview, setIsRenderingPreview] = useState(false)
   const [imageVersion, setImageVersion] = useState(0)
@@ -639,6 +647,7 @@ function App() {
       }
 
       currentBlobUrlRef.current = cached
+      setFastPreviewRgba(null)
       setPreviewImageUrl(cached)
       setIsRenderingPreview(false)
       return
@@ -650,10 +659,13 @@ function App() {
     setResult('')
 
     try {
-      await syncPcSettings(quality)
-      const response: RenderPreviewResult = await client.callLatest('pc.renderPreview', {
-        mode: state.preview_mode,
-        settings: buildPcSettings(quality)
+      const response = await client.callLatest('pc.renderPreview2', {
+        payload: {
+          settings_delta: buildPcSettings(quality),
+          preview_mode: state.preview_mode,
+          preview_max_dim: quality === 'fast' ? Math.min(previewMaxDim, FAST_PREVIEW_CAP) : previewMaxDim,
+          return_format: quality === 'fast' ? 'rgba' : 'png'
+        }
       }, `preview-render-${quality}`, {
         timeoutMs: 120_000
       })
@@ -662,24 +674,40 @@ function App() {
         return
       }
 
-      const pngBlob = new Blob([response.pngBytes], { type: 'image/png' })
-      const nextPreviewUrl = URL.createObjectURL(pngBlob)
+      if (response.kind === 'rgba') {
+        setFastPreviewRgba({ w: response.w, h: response.h, rgba: response.rgba })
+        setPreviewMeta({
+          kind: 'rgba',
+          mode: state.preview_mode,
+          byteLength: response.byteLength,
+          previewQuality: quality
+        })
+      } else {
+        setFastPreviewRgba(null)
+        const pngBlob = new Blob([response.png], { type: 'image/png' })
+        const nextPreviewUrl = URL.createObjectURL(pngBlob)
 
-      cachePreviewUrl(cacheKey, nextPreviewUrl)
+        cachePreviewUrl(cacheKey, nextPreviewUrl)
 
-      const previousUrl = currentBlobUrlRef.current
-      currentBlobUrlRef.current = nextPreviewUrl
+        const previousUrl = currentBlobUrlRef.current
+        currentBlobUrlRef.current = nextPreviewUrl
 
-      if (previousUrl && previousUrl !== nextPreviewUrl && !Array.from(previewCacheRef.current.values()).includes(previousUrl)) {
-        URL.revokeObjectURL(previousUrl)
+        if (previousUrl && previousUrl !== nextPreviewUrl && !Array.from(previewCacheRef.current.values()).includes(previousUrl)) {
+          URL.revokeObjectURL(previousUrl)
+        }
+
+        setPreviewImageUrl(nextPreviewUrl)
+        setPreviewMeta({
+          kind: 'png',
+          mode: state.preview_mode,
+          byteLength: response.byteLength,
+          previewQuality: quality
+        })
       }
-
-      setPreviewImageUrl(nextPreviewUrl)
-      setPreviewMeta(response)
       const elapsedMs = performance.now() - startedAt
       recordPerfEvent(quality === 'fast' ? 'preview-fast' : 'preview-final', elapsedMs)
       setLastOpTimeMs(elapsedMs)
-      setResult(`previewMode=${response.mode}, pngBytes=${response.byteLength}`)
+      setResult(`previewMode=${state.preview_mode}, kind=${response.kind}, bytes=${response.byteLength}`)
     } catch (error) {
       if (error instanceof LatestCallCancelledError) {
         setCancelCount((count) => count + 1)
@@ -877,6 +905,7 @@ function App() {
     if (!state.image_meta || !state.selected_template_id) {
       client.cancelLatest('preview-render-fast')
       client.cancelLatest('preview-render-final')
+      setFastPreviewRgba(null)
       setIsRenderingPreview(false)
       return
     }
@@ -895,16 +924,6 @@ function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, previewDepsHash])
-
-  useEffect(() => {
-    if (engineStatus !== 'ready') {
-      return
-    }
-    void syncPcSettings().catch(() => {
-      // Best effort sync to keep runtime state aligned with UI.
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewDepsHash, engineStatus])
 
   const handleCalculateBestColors = async () => {
     if (!state.image_meta || !state.selected_template_id) {
@@ -1207,6 +1226,7 @@ function App() {
             isRenderingPreview={isRenderingPreview}
             previewMeta={previewMeta}
             previewImageUrl={previewImageUrl}
+            fastPreviewRgba={fastPreviewRgba}
             resolvedCanvas={resolvedCanvas}
             canvasIsDynamic={state.canvas_is_dynamic}
             templatesCount={templates.length}

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useI18n } from '../i18n/I18nProvider'
 import { ImageMeta } from '../state/types'
 
@@ -16,9 +17,16 @@ type ResolvedCanvas = {
 }
 
 type PreviewMeta = {
+  kind: 'png' | 'rgba'
   mode: 'visual' | 'ark_simulation'
   previewQuality: 'fast' | 'final'
   byteLength: number
+}
+
+type FastRgbaPreview = {
+  w: number
+  h: number
+  rgba: ArrayBuffer
 }
 
 type PreviewPaneProps = {
@@ -29,6 +37,7 @@ type PreviewPaneProps = {
   isRenderingPreview: boolean
   previewMeta: PreviewMeta | null
   previewImageUrl: string | null
+  fastPreviewRgba: FastRgbaPreview | null
   resolvedCanvas: ResolvedCanvas | null
   canvasIsDynamic: boolean
   templatesCount: number
@@ -43,12 +52,31 @@ function PreviewPane({
   isRenderingPreview,
   previewMeta,
   previewImageUrl,
+  fastPreviewRgba,
   resolvedCanvas,
   canvasIsDynamic,
   templatesCount,
   warnings
 }: PreviewPaneProps) {
   const { t } = useI18n()
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    if (!fastPreviewRgba || !canvasRef.current) {
+      return
+    }
+
+    const ctx = canvasRef.current.getContext('2d')
+    if (!ctx) {
+      return
+    }
+
+    canvasRef.current.width = fastPreviewRgba.w
+    canvasRef.current.height = fastPreviewRgba.h
+    const u8 = new Uint8ClampedArray(fastPreviewRgba.rgba)
+    const imageData = new ImageData(u8, fastPreviewRgba.w, fastPreviewRgba.h)
+    ctx.putImageData(imageData, 0, 0)
+  }, [fastPreviewRgba])
 
   return (
     <section className="preview-pane">
@@ -89,7 +117,14 @@ function PreviewPane({
                   alt={t('web.preview_render_alt')}
                   draggable={false}
                   onDragStart={(e) => e.preventDefault()}
-                  style={{ maxWidth: '100%', border: '1px solid #ddd' }}
+                  style={{ maxWidth: '100%', border: '1px solid #ddd', display: fastPreviewRgba ? 'none' : 'block' }}
+                />
+              ) : null}
+              {fastPreviewRgba ? (
+                <canvas
+                  ref={canvasRef}
+                  className="preview-pane__image"
+                  style={{ maxWidth: '100%', border: '1px solid #ddd', imageRendering: 'pixelated' }}
                 />
               ) : null}
               {isRenderingPreview ? (

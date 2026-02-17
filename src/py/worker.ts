@@ -142,6 +142,29 @@ type BorderConfig = {
   frame_image: string | null
 }
 
+type PreviewReturnFormat = 'png' | 'rgba'
+
+type RenderPreview2Payload = {
+  settings_delta?: DyesSettings
+  preview_mode: PreviewMode
+  preview_max_dim?: number
+  return_format?: PreviewReturnFormat
+}
+
+type RenderPreview2Result =
+  | {
+      kind: 'png'
+      png: ArrayBuffer
+      byteLength: number
+    }
+  | {
+      kind: 'rgba'
+      w: number
+      h: number
+      rgba: ArrayBuffer
+      byteLength: number
+    }
+
 type DyesSettings = {
   useAllDyes: boolean
   enabledDyes: number[]
@@ -559,6 +582,53 @@ _pc_preview_bytes
       pngBytes: pngBytes.buffer.slice(pngBytes.byteOffset, pngBytes.byteOffset + pngBytes.byteLength)
     }
   },
+  'pc.renderPreview2': async (params) => {
+    const pyodide = await initPyodide()
+    await ensureRuntimeReady(pyodide)
+    const rawPayload = (params as { payload?: unknown } | undefined)?.payload
+    const payload = asRenderPreview2Payload(rawPayload)
+
+    pyodide.globals.set('__pc_preview2_payload', payload)
+
+    try {
+      const result = await runPythonObject(pyodide, `
+import sys
+if '/assets/py_runtime' not in sys.path:
+    sys.path.insert(0, '/assets/py_runtime')
+from pc_web_entry import render_preview2
+render_preview2(__pc_preview2_payload)
+`) as { kind?: unknown; png?: unknown; rgba?: unknown; w?: unknown; h?: unknown }
+
+      const kind = result?.kind
+      if (kind === 'rgba') {
+        const width = asPositiveInt(result.w, 0)
+        const height = asPositiveInt(result.h, 0)
+        const rgbaBytes = asUint8Array(result.rgba, 'pc.renderPreview2 rgba payload is invalid')
+        const rgba = rgbaBytes.slice().buffer as ArrayBuffer
+        return {
+          kind: 'rgba',
+          w: width,
+          h: height,
+          rgba,
+          byteLength: rgba.byteLength
+        } satisfies RenderPreview2Result
+      }
+
+      if (kind === 'png') {
+        const pngBytes = asUint8Array(result.png, 'pc.renderPreview2 png payload is invalid')
+        const png = pngBytes.slice().buffer as ArrayBuffer
+        return {
+          kind: 'png',
+          png,
+          byteLength: png.byteLength
+        } satisfies RenderPreview2Result
+      }
+
+      throw new Error('pc.renderPreview2 returned unknown payload kind')
+    } finally {
+      pyodide.globals.delete('__pc_preview2_payload')
+    }
+  },
   'pc.generatePnt': async (params) => {
     const pyodide = await initPyodide()
     await ensureRuntimeReady(pyodide)
@@ -869,6 +939,23 @@ function ensureParentDir(pyodide: PyodideApi, path: string): void {
   pyodide.FS.mkdirTree(`/${parts.join('/')}`)
 }
 
+async function runPythonObject(pyodide: PyodideApi, script: string): Promise<unknown> {
+  const raw = await pyodide.runPythonAsync(script)
+
+  if (raw && typeof raw === 'object') {
+    const proxy = raw as { toJs?: (options?: { create_proxies?: boolean }) => unknown; destroy?: () => void }
+    if (typeof proxy.toJs === 'function') {
+      const converted = proxy.toJs({ create_proxies: false })
+      if (typeof proxy.destroy === 'function') {
+        proxy.destroy()
+      }
+      return converted
+    }
+  }
+
+  return raw
+}
+
 async function runPythonJson(pyodide: PyodideApi, script: string): Promise<unknown> {
   const raw = await pyodide.runPythonAsync(script)
   if (typeof raw !== 'string') {
@@ -915,6 +1002,22 @@ async function runPythonBytes(pyodide: PyodideApi, script: string): Promise<Uint
   throw new Error('Python script did not return PNG bytes')
 }
 
+function asUint8Array(value: unknown, message: string): Uint8Array {
+  if (value instanceof Uint8Array) {
+    return value
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value)
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
+  }
+
+  throw new Error(message)
+}
+
 function asPreviewMode(value: unknown): PreviewMode {
   if (value === 'visual' || value === 'ark_simulation') {
     return value
@@ -933,6 +1036,30 @@ function asWriterMode(value: unknown): WriterMode {
   }
 
   throw new Error('pc.generatePnt requires settings.writerMode as "legacy_copy", "raster20", or "preserve_source"')
+}
+
+function asPreviewReturnFormat(value: unknown): PreviewReturnFormat {
+  if (value === 'rgba') {
+    return 'rgba'
+  }
+
+  return 'png'
+}
+
+function asRenderPreview2Payload(value: unknown): RenderPreview2Payload {
+  const raw = (value ?? {}) as {
+    settings_delta?: unknown
+    preview_mode?: unknown
+    preview_max_dim?: unknown
+    return_format?: unknown
+  }
+
+  return {
+    settings_delta: asDyesSettings(raw.settings_delta),
+    preview_mode: asPreviewMode(raw.preview_mode ?? 'visual'),
+    preview_max_dim: asPositiveInt(raw.preview_max_dim, 0),
+    return_format: asPreviewReturnFormat(raw.return_format)
+  }
 }
 
 function asDyesSettings(value: unknown): DyesSettings {

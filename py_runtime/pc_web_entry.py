@@ -965,6 +965,59 @@ def render_preview(mode: str = 'visual', settings: dict[str, Any] | None = None)
         return out.getvalue()
 
 
+def render_preview2(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    from PIL import Image
+
+    controller = _get_controller()
+    request = payload if isinstance(payload, dict) else {}
+
+    settings_delta = request.get('settings_delta')
+    if isinstance(settings_delta, dict):
+        apply_settings(settings_delta)
+
+    preview_mode = str(request.get('preview_mode') or 'visual').strip().lower()
+    if preview_mode not in {'visual', 'ark_simulation'}:
+        raise ValueError('preview_mode must be "visual" or "ark_simulation"')
+
+    return_format = str(request.get('return_format') or 'png').strip().lower()
+    if return_format not in {'png', 'rgba'}:
+        raise ValueError('return_format must be "png" or "rgba"')
+
+    preview_max_dim = request.get('preview_max_dim')
+
+    controller.set_preview_mode(preview_mode)
+    preview = controller.render_preview_if_possible()
+    if preview is None:
+        raise RuntimeError('preview-not-ready: preview image could not be produced')
+
+    preview = _compose_preview_overlay_if_needed(controller=controller, preview=preview, mode=preview_mode)
+
+    try:
+        max_dim_int = max(1, int(preview_max_dim))
+        max_side = max(preview.size)
+        if max_side > max_dim_int:
+            scale = max_dim_int / float(max_side)
+            preview = preview.resize(
+                (max(1, int(preview.width * scale)), max(1, int(preview.height * scale))),
+                Image.NEAREST,
+            )
+    except (TypeError, ValueError):
+        pass
+
+    if return_format == 'rgba':
+        preview_rgba = preview.convert('RGBA')
+        return {
+            'kind': 'rgba',
+            'w': int(preview_rgba.width),
+            'h': int(preview_rgba.height),
+            'rgba': preview_rgba.tobytes(),
+        }
+
+    with BytesIO() as out:
+        preview.save(out, format='PNG')
+        return {'kind': 'png', 'png': out.getvalue()}
+
+
 
 def _sanitize_file_part(value: Any, fallback: str) -> str:
     raw = str(value or '').strip()
