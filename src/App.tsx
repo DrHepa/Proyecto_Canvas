@@ -93,7 +93,8 @@ type EngineBootstrapState = 'loading' | 'ready' | 'error'
 
 const DEFAULT_MAX_IMAGE_DIM = 4096
 const DEFAULT_PREVIEW_MAX_DIM = 1024
-const FAST_PREVIEW_CAP = 768
+const FAST_MAX_PIXELS = 350_000
+const FAST_MAX_PIXELS_BORDER = 220_000
 const PREVIEW_CACHE_LIMIT = 30
 const HIGH_PREVIEW_WARNING_DIM = 1536
 const PERF_HISTORY_LIMIT = 60
@@ -128,6 +129,23 @@ function parsePositiveInt(value: string, fallback: number): number {
 
   const intValue = Math.floor(parsed)
   return intValue > 0 ? intValue : fallback
+}
+
+function computeFastPreviewMaxDim(
+  resolvedW: number,
+  resolvedH: number,
+  userPreviewMaxDim: number,
+  borderEnabled: boolean
+): number {
+  const safeW = Math.max(1, Math.floor(resolvedW))
+  const safeH = Math.max(1, Math.floor(resolvedH))
+  const capPixels = borderEnabled ? FAST_MAX_PIXELS_BORDER : FAST_MAX_PIXELS
+  const totalPixels = safeW * safeH
+  const scalePixels = Math.min(1, Math.sqrt(capPixels / totalPixels))
+  const scaleDim = Math.min(1, userPreviewMaxDim / Math.max(safeW, safeH))
+  const scale = Math.min(scalePixels, scaleDim)
+  const targetMaxDim = Math.floor(Math.max(safeW * scale, safeH * scale))
+  return Math.max(64, targetMaxDim)
 }
 
 
@@ -658,12 +676,22 @@ function App() {
     setIsRenderingPreview(true)
     setResult('')
 
+    const resolvedWidth = resolvedCanvas?.width ?? state.image_meta.w
+    const resolvedHeight = resolvedCanvas?.height ?? state.image_meta.h
+    const borderEnabled = state.border_config.style !== 'none' && state.border_config.size > 0
+    const fastPreviewMaxDim = computeFastPreviewMaxDim(
+      resolvedWidth,
+      resolvedHeight,
+      previewMaxDim,
+      borderEnabled
+    )
+
     try {
       const response = await client.callLatest('pc.renderPreview2', {
         payload: {
           settings_delta: buildPcSettings(quality),
           preview_mode: state.preview_mode,
-          preview_max_dim: quality === 'fast' ? Math.min(previewMaxDim, FAST_PREVIEW_CAP) : previewMaxDim,
+          preview_max_dim: quality === 'fast' ? fastPreviewMaxDim : previewMaxDim,
           return_format: quality === 'fast' ? 'rgba' : 'png'
         }
       }, `preview-render-${quality}`, {
