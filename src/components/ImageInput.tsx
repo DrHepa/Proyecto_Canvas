@@ -55,11 +55,11 @@ export default function ImageInput({
       onError?.(null)
       const image = await loadImageAndDownscaleIfNeeded(file, maxImageDim)
       if (image.resized) {
-        onWarning?.(`Image resized to ${image.width}×${image.height} to match max image size (${maxImageDim}).`)
+        onWarning?.(`Downscaled ${image.originalWidth}x${image.originalHeight} → ${image.width}x${image.height} (maxImageDim=${maxImageDim}).`)
       } else {
         onWarning?.(null)
       }
-      await onImageSelected(file, image)
+      await onImageSelected(image.effectiveFile, image)
     } catch (error) {
       onError?.(error instanceof Error ? error.message : String(error))
     }
