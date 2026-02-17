@@ -377,22 +377,23 @@ def _resolve_ranked_dyes(controller: PreviewController, best_colors: int) -> lis
     return _fallback_best_colors(controller, best_colors)
 
 
-def _apply_color_settings(controller: PreviewController, settings: dict[str, Any] | None = None) -> None:
+def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     from PIL import Image
 
+    controller = _get_controller()
     settings_obj = settings if isinstance(settings, dict) else {}
     state = getattr(controller, 'state', None)
     if state is None:
-        return
+        return {'ok': False, 'applied': False}
 
     use_all_dyes = bool(settings_obj.get('useAllDyes', settings_obj.get('use_all_dyes', True)))
     setattr(state, 'use_all_dyes', use_all_dyes)
 
     enabled_dyes = _to_int_set(settings_obj.get('enabledDyes', settings_obj.get('enabled_dyes', [])))
     if use_all_dyes:
-        setattr(state, 'enabled_dyes', None)
+        controller.set_enabled_dyes(None)
     else:
-        setattr(state, 'enabled_dyes', enabled_dyes)
+        controller.set_enabled_dyes(enabled_dyes)
 
     best_colors = settings_obj.get('bestColors')
     try:
@@ -407,9 +408,7 @@ def _apply_color_settings(controller: PreviewController, settings: dict[str, Any
         setattr(state, 'best_colors_ids', [])
 
     dithering_config = _normalize_dithering_config(settings_obj.get('ditheringConfig'))
-    setattr(state, 'dithering_config', dithering_config)
-    setattr(state, 'dithering_mode', dithering_config['mode'])
-    setattr(state, 'dithering_strength', dithering_config['strength'])
+    controller.set_dithering_config(mode=dithering_config['mode'], strength=dithering_config['strength'])
 
     border_config = _normalize_border_config(settings_obj.get('borderConfig'))
     frame_image_path = _resolve_frame_image_path(border_config.get('frame_image'))
@@ -418,11 +417,41 @@ def _apply_color_settings(controller: PreviewController, settings: dict[str, Any
         with Image.open(frame_image_path) as frame_image:
             frame_image_obj = frame_image.convert('RGBA').copy()
 
-    setattr(state, 'border_config', {
-        'style': border_config['style'],
-        'size': border_config['size'],
-        'frame_image': frame_image_obj,
-    })
+    controller.set_border_style(border_config['style'])
+    controller.set_border_size(border_config['size'])
+    controller.set_border_frame_image(frame_image_obj)
+
+    preview_mode = str(settings_obj.get('preview_mode') or settings_obj.get('previewMode') or state.preview_mode or 'visual').strip().lower()
+    if preview_mode in {'visual', 'ark_simulation'}:
+        controller.set_preview_mode(preview_mode)
+
+    setattr(state, 'show_game_object', bool(settings_obj.get('show_game_object', getattr(state, 'show_game_object', False))))
+
+    set_canvas_request(settings_obj.get('canvasRequest'))
+    return {'ok': True, 'applied': True}
+
+
+def set_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    return apply_settings(settings)
+
+
+def calculate_best_colors(n: int, settings: dict[str, Any] | None = None) -> list[int]:
+    controller = _get_controller()
+    apply_settings(settings)
+
+    try:
+        top_n = int(n)
+    except (TypeError, ValueError):
+        top_n = 0
+
+    if top_n <= 0:
+        return []
+
+    selected = controller.calculate_best_dyes(top_n, sample_side=256, max_pixels=65536)
+    state = getattr(controller, 'state', None)
+    if state is not None:
+        setattr(state, 'use_all_dyes', False)
+    return [int(dye_id) for dye_id in selected]
 
 def _normalize_dithering_config(raw: Any) -> dict[str, Any]:
     mode = 'none'
@@ -891,8 +920,7 @@ def render_preview(mode: str = 'visual', settings: dict[str, Any] | None = None)
     if preview_quality not in {'fast', 'final'}:
         raise ValueError('preview_quality must be "fast" or "final"')
 
-    _apply_color_settings(controller, settings_obj)
-    set_canvas_request(settings_obj.get('canvasRequest'))
+    apply_settings(settings_obj)
     controller.set_preview_mode(preview_mode)
     preview = controller.render_preview_if_possible()
     if preview is None:
@@ -921,8 +949,7 @@ def generate_pnt(settings: dict[str, Any] | None = None) -> bytes:
         raise RuntimeError('controller.state is not available')
 
     settings_obj = settings if isinstance(settings, dict) else {}
-    _apply_color_settings(controller, settings_obj)
-    set_canvas_request(settings_obj.get('canvasRequest') if isinstance(settings_obj, dict) else None)
+    apply_settings(settings_obj)
 
     writer_mode = str(settings_obj.get('writerMode') or 'raster20').strip().lower()
     if writer_mode == 'auto':
