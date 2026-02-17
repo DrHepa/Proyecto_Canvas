@@ -32,6 +32,7 @@ type PreviewPaneProps = {
   resolvedCanvas: ResolvedCanvas | null
   canvasIsDynamic: boolean
   templatesCount: number
+  warnings: string[]
 }
 
 function PreviewPane({
@@ -44,7 +45,8 @@ function PreviewPane({
   previewImageUrl,
   resolvedCanvas,
   canvasIsDynamic,
-  templatesCount
+  templatesCount,
+  warnings
 }: PreviewPaneProps) {
   const { t } = useI18n()
 
@@ -54,6 +56,14 @@ function PreviewPane({
         {busyTask ? <p>busy: {busyTask}</p> : null}
         {lastOpTimeMs !== null ? <p>last operation: {lastOpTimeMs.toFixed(1)} ms</p> : null}
         {result ? <p>{t('web.result')}: {result}</p> : null}
+
+        {warnings.length > 0 ? (
+          <div className="status-warnings" aria-live="polite">
+            {warnings.map((warning) => (
+              <p key={warning} className="status-warning">⚠ {warning}</p>
+            ))}
+          </div>
+        ) : null}
 
         {imageMeta ? (
           <p>

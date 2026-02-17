@@ -13,6 +13,7 @@ import { useI18n } from './i18n/I18nProvider'
 import { appStateReducer, initialAppState } from './state/store'
 import { ImageMeta, TemplateCategory, WriterMode } from './state/types'
 import { loadPrefs, savePrefs } from './hooks/usePrefs'
+import { ImageLoadResult } from './utils/image'
 
 type PcListTemplatesResult = {
   count: number
@@ -85,6 +86,7 @@ type EngineBootstrapState = 'loading' | 'ready' | 'error'
 const DEFAULT_MAX_IMAGE_DIM = 4096
 const DEFAULT_PREVIEW_MAX_DIM = 1024
 const PREVIEW_CACHE_LIMIT = 30
+const HIGH_PREVIEW_WARNING_DIM = 1536
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -164,6 +166,7 @@ function App() {
   const [engineStatus, setEngineStatus] = useState<EngineBootstrapState>('loading')
   const [engineBootstrapError, setEngineBootstrapError] = useState<string | null>(null)
   const [imageInputError, setImageInputError] = useState<string | null>(null)
+  const [imageInputWarning, setImageInputWarning] = useState<string | null>(null)
   const [externalEntries, setExternalEntries] = useState<ExternalPntEntry[]>([])
   const [selectedExternalPath, setSelectedExternalPath] = useState<string | null>(null)
   const [folderPickerSupported, setFolderPickerSupported] = useState(false)
@@ -637,7 +640,7 @@ function App() {
     }
   }
 
-  const handleImageUpload = async (file: File, imageBuffer: ArrayBuffer) => {
+  const handleImageUpload = async (file: File, image: ImageLoadResult) => {
     if (!file) {
       return
     }
@@ -646,7 +649,10 @@ function App() {
       const response: ImageMeta = await runWithTiming('Loading image…', async () => {
         return client.call(
           'pc.setImage',
-          { imageBytes: imageBuffer, maxImageDim },
+          {
+            imageBytes: image.bytes.slice().buffer as ArrayBuffer,
+            maxImageDim
+          },
           { timeoutMs: 60_000 }
         )
       })
@@ -856,6 +862,13 @@ function App() {
   }
 
 
+  const nonIntrusiveWarnings = [
+    imageInputWarning,
+    previewMaxDim >= HIGH_PREVIEW_WARNING_DIM
+      ? 'High preview resolution may be slower. Consider 1024 for smoother editing.'
+      : null
+  ].filter((message): message is string => Boolean(message))
+
   return (
     <main className="app-shell">
       <section className="card" aria-busy={loading}>
@@ -895,7 +908,9 @@ function App() {
                 dragActiveLabel={t('panel.image.drop_active')}
                 invalidTypeMessage={t('panel.image.invalid_file')}
                 multipleFilesMessage={t('panel.image.single_file_only')}
+                maxImageDim={maxImageDim}
                 onError={setImageInputError}
+                onWarning={setImageInputWarning}
                 onImageSelected={handleImageUpload}
               />
               {imageInputError ? <p className="image-input__error">{imageInputError}</p> : null}
@@ -1040,6 +1055,7 @@ function App() {
             resolvedCanvas={resolvedCanvas}
             canvasIsDynamic={state.canvas_is_dynamic}
             templatesCount={templates.length}
+            warnings={nonIntrusiveWarnings}
           />
         </div>
       </section>
