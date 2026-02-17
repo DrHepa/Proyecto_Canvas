@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { LatestCallCancelledError, PyWorkerClient, RpcError } from './py/client'
 import DyesPanel, { DyeInfo } from './components/DyesPanel'
 import DitherPanel from './components/DitherPanel'
@@ -10,6 +10,7 @@ import { ExternalPntEntry } from './components/ExternalLibraryPanel'
 import AdvancedPanel from './components/AdvancedPanel'
 import PreviewPane from './components/PreviewPane'
 import PerfHud, { PerfEventType, PerfReport } from './components/PerfHud'
+import IntroSplash from './components/IntroSplash'
 import { useI18n } from './i18n/I18nProvider'
 import { appStateReducer, initialAppState } from './state/store'
 import { ImageMeta, TemplateCategory, WriterMode } from './state/types'
@@ -90,6 +91,7 @@ type ExternalScanResult = {
 }
 
 type EngineBootstrapState = 'loading' | 'ready' | 'error'
+type GuiStyleId = 'reference' | 'studio' | 'compact' | 'kiosk'
 
 const DEFAULT_MAX_IMAGE_DIM = 4096
 const DEFAULT_PREVIEW_MAX_DIM = 1024
@@ -156,6 +158,13 @@ function parseTemplateCategory(value: string | undefined): TemplateCategory {
   return 'all'
 }
 
+function parseGuiStyle(value: string | undefined): GuiStyleId {
+  if (value === 'reference' || value === 'studio' || value === 'compact' || value === 'kiosk') {
+    return value
+  }
+  return 'reference'
+}
+
 function sanitizeFileNamePart(value: string): string {
   return value
     .trim()
@@ -176,6 +185,11 @@ function App() {
     show_game_object: prefs.showGameObject ?? initialAppState.show_game_object
   })
   const [showAdvanced, setShowAdvanced] = useState(prefs.advancedOpen ?? false)
+  const [kioskControlsOpen, setKioskControlsOpen] = useState(false)
+  const [guiStyle, setGuiStyle] = useState<GuiStyleId>(parseGuiStyle(prefs.guiStyle))
+  const [introDismissed, setIntroDismissed] = useState(prefs.introDismissed ?? false)
+  const [introVisible, setIntroVisible] = useState(!introDismissed)
+  const introHideTimerRef = useRef<number | null>(null)
 
   const [result, setResult] = useState<string>('')
   const [loading, setLoading] = useState(false)
@@ -218,6 +232,14 @@ function App() {
   const pendingPreviewQualityRef = useRef<'fast' | 'final'>('final')
 
   useEffect(() => () => client.dispose(), [client])
+
+  useEffect(() => {
+    return () => {
+      if (introHideTimerRef.current !== null) {
+        window.clearTimeout(introHideTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -315,6 +337,8 @@ function App() {
     const timeoutId = window.setTimeout(() => {
       savePrefs({
         lang: locale,
+        guiStyle,
+        introDismissed,
         advancedOpen: showAdvanced,
         previewMode: state.preview_mode,
         showGameObject: state.show_game_object,
@@ -329,6 +353,8 @@ function App() {
       window.clearTimeout(timeoutId)
     }
   }, [
+    guiStyle,
+    introDismissed,
     locale,
     maxImageDim,
     previewMaxDim,
@@ -427,6 +453,32 @@ function App() {
   }, [client])
 
   const statusLine = `Engine: ${engineStatus} · Templates: ${templates.length} · Dyes: ${availableDyes.length}`
+
+  useEffect(() => {
+    if (introHideTimerRef.current !== null) {
+      window.clearTimeout(introHideTimerRef.current)
+      introHideTimerRef.current = null
+    }
+
+    if (!introDismissed) {
+      setIntroVisible(true)
+      if (engineStatus === 'ready') {
+        introHideTimerRef.current = window.setTimeout(() => {
+          setIntroVisible(false)
+          setIntroDismissed(true)
+        }, 450)
+      }
+      return
+    }
+
+    if (engineStatus !== 'ready') {
+      setIntroVisible(true)
+      return
+    }
+
+    setIntroVisible(false)
+  }, [engineStatus, introDismissed])
+
 
   const handleSetTemplate = async (templateId: string) => {
     if (!templateId) {
@@ -1054,122 +1106,315 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  const renderHeaderControls = () => (
+    <header className="header-row">
+      <div>
+        <h1>{t('app.title')}</h1>
+        <p>{t('web.app_subtitle')}</p>
+        <p className="status-line">
+          {statusLine}
+          {engineBootstrapError ? ` · ${engineBootstrapError}` : ''}
+        </p>
+      </div>
+      <div className="header-controls">
+        <label htmlFor="language-selector">
+          {t('panel.language')}
+          <select
+            id="language-selector"
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as 'es' | 'en' | 'ru' | 'zh')}
+          >
+            <option value="es">{t('language.es')}</option>
+            <option value="en">{t('language.en')}</option>
+            <option value="ru">{t('language.ru')}</option>
+            <option value="zh">{t('language.zh')}</option>
+          </select>
+        </label>
+
+        <label htmlFor="gui-style-selector">
+          {t('panel.gui_style')}
+          <select
+            id="gui-style-selector"
+            value={guiStyle}
+            onChange={(event) => setGuiStyle(parseGuiStyle(event.target.value))}
+          >
+            <option value="reference">{t('gui_style.reference')}</option>
+            <option value="studio">{t('gui_style.studio')}</option>
+            <option value="compact">{t('gui_style.compact')}</option>
+            <option value="kiosk">{t('gui_style.kiosk')}</option>
+          </select>
+        </label>
+      </div>
+    </header>
+  )
+
+  const renderGenerateButton = () => (
+    <div className="actions-grid" role="group" aria-label="generate-actions">
+      <button onClick={handleGeneratePnt} type="button" disabled={loading}>{loading ? t('status.generating_pnt') : t('btn.generate')}</button>
+    </div>
+  )
+
+  const renderAdvancedSection = () => (
+    <>
+      <button
+        className="advanced-toggle"
+        type="button"
+        onClick={() => setShowAdvanced((value) => !value)}
+        aria-expanded={showAdvanced}
+      >
+        {t('panel.advanced')}
+      </button>
+
+      {showAdvanced ? (
+        <AdvancedPanel
+          disabled={loading}
+          maxImageDim={maxImageDim}
+          previewMaxDim={previewMaxDim}
+          onMaxImageDimChange={(nextValue) => setMaxImageDim(parsePositiveInt(String(nextValue), DEFAULT_MAX_IMAGE_DIM))}
+          onPreviewMaxDimChange={(nextValue) => setPreviewMaxDim(parsePositiveInt(String(nextValue), DEFAULT_PREVIEW_MAX_DIM))}
+          externalEntries={externalEntries}
+          selectedExternalPath={selectedExternalPath}
+          folderPickerSupported={folderPickerSupported}
+          onUploadFiles={(files) => {
+            void ingestExternalFiles(files)
+          }}
+          onPickFolder={(files) => {
+            void ingestExternalFiles(files)
+          }}
+          onSelectPath={setSelectedExternalPath}
+          onUseForGenerate={() => {
+            void handleUseExternal()
+          }}
+          diagnostics={(
+            <div>
+              <p className="status-line">{statusLine}</p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={showPerfHud}
+                  onChange={(event) => setShowPerfHud(event.target.checked)}
+                />
+                Show Perf HUD
+              </label>
+              {showPerfHud ? (
+                <PerfHud
+                  summary={perfSummary}
+                  onCopyReport={copyPerfReport}
+                  onDownloadReport={downloadPerfReport}
+                />
+              ) : null}
+            </div>
+          )}
+        />
+      ) : null}
+    </>
+  )
+
+  const renderSourcePanels = () => (
+    <>
+      <ImageInput
+        disabled={loading}
+        buttonLabel={t('btn.open_image')}
+        dropLabel={t('panel.image.drop_here')}
+        dragActiveLabel={t('panel.image.drop_active')}
+        invalidTypeMessage={t('panel.image.invalid_file')}
+        multipleFilesMessage={t('panel.image.single_file_only')}
+        maxImageDim={maxImageDim}
+        onError={setImageInputError}
+        onWarning={setImageInputWarning}
+        onImageSelected={handleImageUpload}
+      />
+      {imageInputError ? <p className="image-input__error">{imageInputError}</p> : null}
+    </>
+  )
+
+  const renderCanvasPanels = () => (
+    <>
+      <CanvasSelector
+        templates={templates}
+        selectedTemplateId={state.selected_template_id}
+        selectedCategory={state.selected_template_category}
+        searchText={templateSearchText}
+        disabled={loading}
+        onCategoryChange={handleTemplateCategoryChange}
+        onTemplateChange={(nextTemplateId) => {
+          dispatch({ type: 'setSelectedTemplateId', payload: nextTemplateId })
+          void handleSetTemplate(nextTemplateId)
+        }}
+        onSearchChange={setTemplateSearchText}
+      />
+
+      <CanvasLayoutPanel
+        layout={canvasLayout}
+        request={state.canvas_request}
+        disabled={loading || !state.selected_template_id}
+        onChange={(nextRequest) => {
+          void handleCanvasRequestChange(nextRequest)
+        }}
+      />
+    </>
+  )
+
+  const renderPreviewModePanel = () => (
+    <fieldset className="previewModeFieldset" disabled={loading}>
+      <legend>{t('panel.preview_mode')}</legend>
+      <label>
+        <input
+          type="radio"
+          name="preview-mode"
+          value="visual"
+          checked={state.preview_mode === 'visual'}
+          onChange={() => dispatch({ type: 'setPreviewMode', payload: 'visual' })}
+        />
+        {t('preview_mode.visual')}
+      </label>
+      <label>
+        <input
+          type="radio"
+          name="preview-mode"
+          value="ark_simulation"
+          checked={state.preview_mode === 'ark_simulation'}
+          onChange={() => dispatch({ type: 'setPreviewMode', payload: 'ark_simulation' })}
+        />
+        {t('preview_mode.ark_simulation')}
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={state.show_game_object}
+          onChange={(event) => dispatch({ type: 'setShowGameObject', payload: event.target.checked })}
+        />
+        {t('chk.show_game_object')} ({state.show_game_object ? 'on' : 'off'})
+      </label>
+    </fieldset>
+  )
+
+  const renderDyesPanel = () => (
+    <DyesPanel
+      dyes={availableDyes}
+      useAllDyes={useAllDyes}
+      enabledDyes={state.enabled_dyes}
+      bestColors={bestColors}
+      disabled={loading}
+      onUseAllDyesChange={handleUseAllDyesChange}
+      onToggleSwatch={handleToggleSwatch}
+      onSetAllVisible={handleSetAllVisible}
+      onBestColorsChange={setBestColors}
+      onCalculateBestColors={handleCalculateBestColors}
+    />
+  )
+
+  const renderBorderAndDither = () => (
+    <>
+      <BorderPanel
+        config={state.border_config}
+        frameImages={availableFrameImages}
+        disabled={loading}
+        onChange={(value, options) => {
+          pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
+          dispatch({ type: 'setBorderConfig', payload: value })
+        }}
+      />
+
+      <DitherPanel
+        config={state.dithering_config}
+        disabled={loading}
+        onChange={(value, options) => {
+          pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
+          dispatch({ type: 'setDitheringConfig', payload: value })
+        }}
+      />
+    </>
+  )
+
+  const renderControlStack = () => (
+    <>
+      {renderSourcePanels()}
+      {renderCanvasPanels()}
+      {renderPreviewModePanel()}
+      {renderDyesPanel()}
+      {renderBorderAndDither()}
+      {renderAdvancedSection()}
+      {renderGenerateButton()}
+    </>
+  )
+
+  const renderPreviewPane = () => (
+    <PreviewPane
+      busyTask={busyTask}
+      lastOpTimeMs={lastOpTimeMs}
+      result={result}
+      imageMeta={state.image_meta}
+      isRenderingPreview={isRenderingPreview}
+      previewMeta={previewMeta}
+      previewImageUrl={previewImageUrl}
+      fastPreviewRgba={fastPreviewRgba}
+      resolvedCanvas={resolvedCanvas}
+      canvasIsDynamic={state.canvas_is_dynamic}
+      templatesCount={templates.length}
+      warnings={nonIntrusiveWarnings}
+    />
+  )
+
+  const section = (label: string, content: ReactNode) => (
+    <details className="compact-section" open>
+      <summary>{label}</summary>
+      <div className="compact-section__body">{content}</div>
+    </details>
+  )
+
   return (
-    <main className="app-shell">
+    <main className={`app-shell theme-${guiStyle} layout-${guiStyle}`}>
+      <IntroSplash
+        visible={introVisible}
+        title={t('web.intro.title')}
+        body={t('web.intro.body')}
+        bullets={[
+          t('web.intro.bullets.convert'),
+          t('web.intro.bullets.templates'),
+          t('web.intro.bullets.dyes'),
+          t('web.intro.bullets.border_dither'),
+          t('web.intro.bullets.external')
+        ]}
+        statusLine={`${statusLine}${engineBootstrapError ? ` · ${engineBootstrapError}` : ''}`}
+        enterLabel={t('web.intro.enter')}
+        showSpinner={engineStatus !== 'ready'}
+        onEnter={() => {
+          setIntroDismissed(true)
+          setIntroVisible(false)
+        }}
+      />
       <section className="card" aria-busy={loading}>
-        <header className="header-row">
-          <div>
-            <h1>{t('app.title')}</h1>
-            <p>{t('web.app_subtitle')}</p>
-            <p className="status-line">
-              {statusLine}
-              {engineBootstrapError ? ` · ${engineBootstrapError}` : ''}
-            </p>
-          </div>
-          <label htmlFor="language-selector">
-            {t('panel.language')}
-            <select
-              id="language-selector"
-              value={locale}
-              onChange={(event) => setLocale(event.target.value as 'es' | 'en' | 'ru' | 'zh')}
-            >
-              <option value="es">{t('language.es')}</option>
-              <option value="en">{t('language.en')}</option>
-              <option value="ru">{t('language.ru')}</option>
-              <option value="zh">{t('language.zh')}</option>
-            </select>
-          </label>
-        </header>
+        {renderHeaderControls()}
 
         {!ready ? <p>{t('web.loading_locales')}</p> : null}
 
-        <div className="workspace-layout">
-          <aside className="sidebar">
-            <div className="panel-card">
-              <ImageInput
-                disabled={loading}
-                buttonLabel={t('btn.open_image')}
-                dropLabel={t('panel.image.drop_here')}
-                dragActiveLabel={t('panel.image.drop_active')}
-                invalidTypeMessage={t('panel.image.invalid_file')}
-                multipleFilesMessage={t('panel.image.single_file_only')}
-                maxImageDim={maxImageDim}
-                onError={setImageInputError}
-                onWarning={setImageInputWarning}
-                onImageSelected={handleImageUpload}
-              />
-              {imageInputError ? <p className="image-input__error">{imageInputError}</p> : null}
+        {guiStyle === 'reference' ? (
+          <div className="workspace-layout">
+            <aside className="sidebar"><div className="panel-card">{renderControlStack()}</div></aside>
+            {renderPreviewPane()}
+          </div>
+        ) : null}
 
-              <CanvasSelector
-                templates={templates}
-                selectedTemplateId={state.selected_template_id}
-                selectedCategory={state.selected_template_category}
-                searchText={templateSearchText}
-                disabled={loading}
-                onCategoryChange={handleTemplateCategoryChange}
-                onTemplateChange={(nextTemplateId) => {
-                  dispatch({ type: 'setSelectedTemplateId', payload: nextTemplateId })
-                  void handleSetTemplate(nextTemplateId)
-                }}
-                onSearchChange={setTemplateSearchText}
-              />
+        {guiStyle === 'studio' ? (
+          <div className="studio-layout">
+            <div className="panel-card studio-left">{renderSourcePanels()}{renderCanvasPanels()}</div>
+            <div className="studio-center">{renderPreviewPane()}</div>
+            <div className="panel-card studio-right">{renderPreviewModePanel()}{renderDyesPanel()}{renderBorderAndDither()}</div>
+            <div className="panel-card studio-bottom">{renderAdvancedSection()}{renderGenerateButton()}</div>
+          </div>
+        ) : null}
 
-              <CanvasLayoutPanel
-                layout={canvasLayout}
-                request={state.canvas_request}
-                disabled={loading || !state.selected_template_id}
-                onChange={(nextRequest) => {
-                  void handleCanvasRequestChange(nextRequest)
-                }}
-              />
-
-              <fieldset className="previewModeFieldset" disabled={loading}>
-                <legend>{t('panel.preview_mode')}</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name="preview-mode"
-                    value="visual"
-                    checked={state.preview_mode === 'visual'}
-                    onChange={() => dispatch({ type: 'setPreviewMode', payload: 'visual' })}
-                  />
-                  {t('preview_mode.visual')}
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="preview-mode"
-                    value="ark_simulation"
-                    checked={state.preview_mode === 'ark_simulation'}
-                    onChange={() => dispatch({ type: 'setPreviewMode', payload: 'ark_simulation' })}
-                  />
-                  {t('preview_mode.ark_simulation')}
-                </label>
-
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={state.show_game_object}
-                    onChange={(event) => dispatch({ type: 'setShowGameObject', payload: event.target.checked })}
-                  />
-                  {t('chk.show_game_object')} ({state.show_game_object ? 'on' : 'off'})
-                </label>
-              </fieldset>
-
-              <DyesPanel
-                dyes={availableDyes}
-                useAllDyes={useAllDyes}
-                enabledDyes={state.enabled_dyes}
-                bestColors={bestColors}
-                disabled={loading}
-                onUseAllDyesChange={handleUseAllDyesChange}
-                onToggleSwatch={handleToggleSwatch}
-                onSetAllVisible={handleSetAllVisible}
-                onBestColorsChange={setBestColors}
-                onCalculateBestColors={handleCalculateBestColors}
-              />
-
-              <BorderPanel
+        {guiStyle === 'compact' ? (
+          <div className="compact-layout">
+            <div className="compact-preview">{renderPreviewPane()}</div>
+            <div className="panel-card compact-controls">
+              {section(t('panel.image'), renderSourcePanels())}
+              {section(t('panel.canvas'), renderCanvasPanels())}
+              {section(t('panel.preview_mode'), renderPreviewModePanel())}
+              {section(t('panel.dyes'), renderDyesPanel())}
+              {section(t('panel.border'), <BorderPanel
                 config={state.border_config}
                 frameImages={availableFrameImages}
                 disabled={loading}
@@ -1177,90 +1422,37 @@ function App() {
                   pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
                   dispatch({ type: 'setBorderConfig', payload: value })
                 }}
-              />
-
-              <DitherPanel
+              />)}
+              {section(t('panel.dithering'), <DitherPanel
                 config={state.dithering_config}
                 disabled={loading}
                 onChange={(value, options) => {
                   pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
                   dispatch({ type: 'setDitheringConfig', payload: value })
                 }}
-              />
-
-              <button
-                className="advanced-toggle"
-                type="button"
-                onClick={() => setShowAdvanced((value) => !value)}
-                aria-expanded={showAdvanced}
-              >
-                {t('panel.advanced')}
-              </button>
-
-              {showAdvanced ? (
-                <AdvancedPanel
-                  disabled={loading}
-                  maxImageDim={maxImageDim}
-                  previewMaxDim={previewMaxDim}
-                  onMaxImageDimChange={(nextValue) => setMaxImageDim(parsePositiveInt(String(nextValue), DEFAULT_MAX_IMAGE_DIM))}
-                  onPreviewMaxDimChange={(nextValue) => setPreviewMaxDim(parsePositiveInt(String(nextValue), DEFAULT_PREVIEW_MAX_DIM))}
-                  externalEntries={externalEntries}
-                  selectedExternalPath={selectedExternalPath}
-                  folderPickerSupported={folderPickerSupported}
-                  onUploadFiles={(files) => {
-                    void ingestExternalFiles(files)
-                  }}
-                  onPickFolder={(files) => {
-                    void ingestExternalFiles(files)
-                  }}
-                  onSelectPath={setSelectedExternalPath}
-                  onUseForGenerate={() => {
-                    void handleUseExternal()
-                  }}
-                  diagnostics={(
-                    <div>
-                      <p className="status-line">{statusLine}</p>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={showPerfHud}
-                          onChange={(event) => setShowPerfHud(event.target.checked)}
-                        />
-                        Show Perf HUD
-                      </label>
-                      {showPerfHud ? (
-                        <PerfHud
-                          summary={perfSummary}
-                          onCopyReport={copyPerfReport}
-                          onDownloadReport={downloadPerfReport}
-                        />
-                      ) : null}
-                    </div>
-                  )}
-                />
-              ) : null}
-
-              <div className="actions-grid" role="group" aria-label="generate-actions">
-                <button onClick={handleGeneratePnt} type="button" disabled={loading}>{loading ? t('status.generating_pnt') : t('btn.generate')}</button>
-              </div>
+              />)}
+              {section(t('panel.advanced'), renderAdvancedSection())}
+              {renderGenerateButton()}
             </div>
-          </aside>
+          </div>
+        ) : null}
 
-          <PreviewPane
-            busyTask={busyTask}
-            lastOpTimeMs={lastOpTimeMs}
-            result={result}
-            imageMeta={state.image_meta}
-            isRenderingPreview={isRenderingPreview}
-            previewMeta={previewMeta}
-            previewImageUrl={previewImageUrl}
-            fastPreviewRgba={fastPreviewRgba}
-            resolvedCanvas={resolvedCanvas}
-            canvasIsDynamic={state.canvas_is_dynamic}
-            templatesCount={templates.length}
-            warnings={nonIntrusiveWarnings}
-          />
-        </div>
+        {guiStyle === 'kiosk' ? (
+          <div className="kiosk-layout">
+            <div className="kiosk-preview">{renderPreviewPane()}</div>
+            <button
+              className="kiosk-controls-toggle"
+              type="button"
+              onClick={() => setKioskControlsOpen((value) => !value)}
+              aria-expanded={kioskControlsOpen}
+            >
+              Controls
+            </button>
+            <aside className={`kiosk-controls ${kioskControlsOpen ? 'is-open' : ''}`}>
+              <div className="panel-card">{renderControlStack()}</div>
+            </aside>
+          </div>
+        ) : null}
       </section>
     </main>
   )

@@ -95,5 +95,19 @@
   "panel.image.drop_here": "Перетащите изображение сюда (PNG/JPG/WebP)",
   "panel.image.drop_active": "Отпустите, чтобы загрузить изображение",
   "panel.image.invalid_file": "Неверный файл. Перетащите изображение PNG, JPG или WebP.",
-  "panel.image.single_file_only": "Перетащите ровно один файл."
+  "panel.image.single_file_only": "Перетащите ровно один файл.",
+  "panel.gui_style": "Стиль интерфейса",
+  "gui_style.reference": "Эталон",
+  "gui_style.studio": "Студия",
+  "gui_style.compact": "Компактный",
+  "gui_style.kiosk": "Киоск",
+  "web.app_subtitle": "Proyecto Canvas преобразует изображения в .pnt для ARK с шаблонами, красителями, дизерингом и рамкой.",
+  "web.intro.title": "Proyecto Canvas",
+  "web.intro.body": "Подготовьте изображение и экспортируйте файлы раскраски ARK с шаблонами и параметрами генерации.",
+  "web.intro.bullets.convert": "Преобразование PNG/JPG/WebP в .pnt.",
+  "web.intro.bullets.templates": "Выбор шаблонов холста по категориям и макету.",
+  "web.intro.bullets.dyes": "Настройка красителей, лучших цветов и видимости перед генерацией.",
+  "web.intro.bullets.border_dither": "Настройка рамки и дизеринга для финального качества.",
+  "web.intro.bullets.external": "Загрузка внешних библиотек .pnt для повторного использования.",
+  "web.intro.enter": "Войти"
 }
