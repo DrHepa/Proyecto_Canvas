@@ -168,6 +168,84 @@ legend { font-size: var(--pc-font-sm); color: var(--pc-muted); padding: 0 0.25re
 }
 .image-input__dropzone p { margin: 0; font-size: var(--pc-font-sm); }
 .preview-pane img { user-select: none; -webkit-user-drag: none; }
+.previewHero {
+  gap: 0.65rem;
+  min-height: 100%;
+}
+.previewHero__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.previewHero__header h2 { margin: 0; }
+.previewHero__badge {
+  font-size: var(--pc-font-sm);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--pc-accent) 40%, var(--pc-border));
+  background: color-mix(in oklab, var(--pc-accent) 16%, var(--pc-panel));
+  color: color-mix(in oklab, white 90%, var(--pc-accent));
+}
+.previewHero__bannerWrap { display: grid; gap: 0.35rem; }
+.previewHero__banner {
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.5rem;
+  font-size: var(--pc-font-sm);
+}
+.previewHero__banner--warning {
+  border: 1px solid #7c4a03;
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+}
+.previewHero__banner--error {
+  border: 1px solid color-mix(in oklab, var(--pc-danger) 55%, black);
+  background: color-mix(in oklab, var(--pc-danger) 20%, transparent);
+  color: #fecdd3;
+}
+.previewHero__body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: clamp(260px, 42vh, 560px);
+}
+.previewHero__frame {
+  position: relative;
+  width: 100%;
+  min-height: clamp(240px, 38vh, 520px);
+  border: 1px solid var(--pc-border);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(96, 165, 250, 0.07), transparent 45%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.35), rgba(2, 6, 23, 0.1)),
+    repeating-linear-gradient(0deg, rgba(148, 163, 184, 0.06) 0 1px, transparent 1px 20px),
+    repeating-linear-gradient(90deg, rgba(148, 163, 184, 0.05) 0 1px, transparent 1px 20px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 14px 24px rgba(2, 6, 23, 0.24);
+}
+.previewHero__body--ready .previewHero__frame {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--pc-accent) 15%, transparent), 0 14px 24px rgba(2, 6, 23, 0.24);
+}
+.preview-pane__image {
+  display: block;
+  max-width: 100%;
+  max-height: min(70vh, calc(100vh - 280px));
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.previewHero__placeholder {
+  margin: 0;
+  color: var(--pc-muted);
+  font-size: var(--pc-font-sm);
+  text-align: center;
+}
 .image-input__dropzone:hover,
 .image-input__dropzone--dragging {
   border-color: color-mix(in oklab, var(--pc-accent) 65%, white);
@@ -238,7 +316,8 @@ input[type='range']::-moz-range-thumb {
 }
 
 .previewWrap { position: relative; }
-.previewOverlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.15); backdrop-filter: blur(1px); }
+.previewOverlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.2); backdrop-filter: blur(1px); }
+.previewOverlay__content { display: grid; justify-items: center; gap: 0.35rem; color: #e2e8f0; font-size: var(--pc-font-sm); }
 .spinner { width: 18px; height: 18px; border-radius: 999px; border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: rgba(255, 255, 255, 0.9); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -248,8 +327,6 @@ input[type='range']::-moz-range-thumb {
 .advanced-panel__fieldset details { display: grid; gap: 0.45rem; }
 .advanced-panel__diag-toggle { width: fit-content; }
 .advanced-panel__diagnostics { margin-top: 0.45rem; }
-.status-warnings { display: grid; gap: 0.35rem; }
-.status-warning { margin: 0; padding: 0.42rem 0.58rem; border: 1px solid #7c4a03; border-radius: 0.5rem; background: rgba(245, 158, 11, 0.12); color: #fcd34d; font-size: var(--pc-font-sm); }
 
 .intro-splash { position: fixed; inset: 0; background: rgba(2, 6, 23, 0.72); z-index: 12; display: grid; place-items: center; padding: 1rem; }
 .intro-splash__card { width: min(620px, 100%); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-card); background: var(--pc-card); padding: 1rem 1.1rem; display: grid; gap: 0.75rem; }

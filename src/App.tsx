@@ -9,6 +9,7 @@ import ImageInput from './components/ImageInput'
 import { ExternalPntEntry } from './components/ExternalLibraryPanel'
 import AdvancedPanel from './components/AdvancedPanel'
 import PreviewPane from './components/PreviewPane'
+import DebugPreviewDetails from './components/DebugPreviewDetails'
 import PerfHud, { PerfEventType, PerfReport } from './components/PerfHud'
 import IntroSplash from './components/IntroSplash'
 import { useI18n } from './i18n/I18nProvider'
@@ -1024,6 +1025,10 @@ function App() {
       : null
   ].filter((message): message is string => Boolean(message))
 
+  const previewError = result.startsWith('RPC error:') || result.startsWith('Error:') || result.startsWith('Unknown error:')
+    ? result
+    : null
+
   const perfSummary = useMemo(() => {
     const grouped = perfEvents.reduce<Record<PerfEventType, number[]>>((acc, event) => {
       acc[event.type].push(event.ms)
@@ -1162,6 +1167,16 @@ function App() {
           diagnostics={(
             <div>
               <p className="status-line">{statusLine}</p>
+              <DebugPreviewDetails
+                busyTask={busyTask}
+                lastOpTimeMs={lastOpTimeMs}
+                result={result}
+                imageMeta={state.image_meta}
+                previewMeta={previewMeta}
+                resolvedCanvas={resolvedCanvas}
+                canvasIsDynamic={state.canvas_is_dynamic}
+                templatesCount={templates.length}
+              />
               <label>
                 <input
                   type="checkbox"
@@ -1304,18 +1319,12 @@ function App() {
 
   const renderPreviewPane = () => (
     <PreviewPane
-      busyTask={busyTask}
-      lastOpTimeMs={lastOpTimeMs}
-      result={result}
-      imageMeta={state.image_meta}
       isRenderingPreview={isRenderingPreview}
-      previewMeta={previewMeta}
+      previewMode={state.preview_mode}
       previewImageUrl={previewImageUrl}
       fastPreviewRgba={fastPreviewRgba}
-      resolvedCanvas={resolvedCanvas}
-      canvasIsDynamic={state.canvas_is_dynamic}
-      templatesCount={templates.length}
       warnings={nonIntrusiveWarnings}
+      error={previewError}
     />
   )
 
