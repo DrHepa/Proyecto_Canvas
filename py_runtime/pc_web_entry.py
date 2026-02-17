@@ -432,6 +432,17 @@ def _resolve_ranked_dyes(controller: PreviewController, best_colors: int) -> lis
     return _fallback_best_colors(controller, best_colors)
 
 
+def _has_any(d: dict[str, Any], *keys: str) -> bool:
+    return any(k in d for k in keys)
+
+
+def _get_any(d: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for k in keys:
+        if k in d:
+            return d[k]
+    return default
+
+
 def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     controller = _get_controller()
     settings_obj = settings if isinstance(settings, dict) else {}
@@ -459,8 +470,8 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                     enabled_dyes = {0}
             controller.set_enabled_dyes(enabled_dyes)
 
-    if 'bestColors' in settings_obj:
-        best_colors = settings_obj.get('bestColors')
+    if _has_any(settings_obj, 'bestColors', 'best_colors'):
+        best_colors = _get_any(settings_obj, 'bestColors', 'best_colors')
         try:
             best_colors_int = max(0, int(best_colors)) if best_colors is not None else 0
         except (TypeError, ValueError):
@@ -472,12 +483,14 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         else:
             setattr(state, 'best_colors_ids', [])
 
-    if 'ditheringConfig' in settings_obj:
-        dithering_config = _normalize_dithering_config(settings_obj.get('ditheringConfig'))
+    if _has_any(settings_obj, 'ditheringConfig', 'dithering_config'):
+        raw = _get_any(settings_obj, 'ditheringConfig', 'dithering_config')
+        dithering_config = _normalize_dithering_config(raw)
         controller.set_dithering_config(mode=dithering_config['mode'], strength=dithering_config['strength'])
 
-    if 'borderConfig' in settings_obj:
-        border_config = _normalize_border_config(settings_obj.get('borderConfig'))
+    if _has_any(settings_obj, 'borderConfig', 'border_config'):
+        raw = _get_any(settings_obj, 'borderConfig', 'border_config')
+        border_config = _normalize_border_config(raw)
         frame_image_path = _resolve_frame_image_path(border_config.get('frame_image'))
         frame_image_key = str(frame_image_path) if frame_image_path is not None else None
         current_frame_key = getattr(state, 'border_frame_image_key', None)
@@ -505,16 +518,16 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             controller.set_border_frame_image(None)
             setattr(state, 'border_frame_image_key', None)
 
-    if 'preview_mode' in settings_obj or 'previewMode' in settings_obj:
-        preview_mode = str(settings_obj.get('preview_mode') or settings_obj.get('previewMode') or '').strip().lower()
+    if _has_any(settings_obj, 'preview_mode', 'previewMode'):
+        preview_mode = str(_get_any(settings_obj, 'preview_mode', 'previewMode') or '').strip().lower()
         if preview_mode in {'visual', 'ark_simulation'}:
             controller.set_preview_mode(preview_mode)
 
-    if 'show_game_object' in settings_obj:
-        setattr(state, 'show_game_object', bool(settings_obj.get('show_game_object')))
+    if _has_any(settings_obj, 'show_game_object', 'showGameObject'):
+        setattr(state, 'show_game_object', bool(_get_any(settings_obj, 'show_game_object', 'showGameObject')))
 
-    if 'canvasRequest' in settings_obj:
-        set_canvas_request(settings_obj.get('canvasRequest'))
+    if _has_any(settings_obj, 'canvasRequest', 'canvas_request'):
+        set_canvas_request(_get_any(settings_obj, 'canvasRequest', 'canvas_request'))
     return {'ok': True, 'applied': True}
 
 
