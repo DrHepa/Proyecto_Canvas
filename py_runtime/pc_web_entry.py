@@ -682,6 +682,8 @@ def _normalize_border_config(raw: Any) -> dict[str, Any]:
 
 def _compose_preview_overlay_if_needed(*, controller: PreviewController, preview: 'Image.Image', mode: str) -> 'Image.Image':
     from PIL import Image
+    import numpy as np
+    from FrameBorder import apply_frame_border
 
     """Compose template overlay in web runtime for ARK simulation previews."""
     if mode != 'ark_simulation':
@@ -716,6 +718,40 @@ def _compose_preview_overlay_if_needed(*, controller: PreviewController, preview
 
     output = preview.convert('RGBA')
     output.alpha_composite(overlay_rgba)
+
+    # Dynamic canvases (preview-only) can have overlays that cover the border.
+    # Re-apply the border after compositing so the user can see it.
+    try:
+        if bool(getattr(state, 'canvas_is_dynamic', False)):
+            border_cfg = getattr(state, 'border_config', None)
+            if isinstance(border_cfg, dict):
+                style = str(border_cfg.get('style', 'none') or 'none').strip().lower()
+                size_raw = border_cfg.get('size', 0)
+                try:
+                    size = int(size_raw)
+                except (TypeError, ValueError):
+                    size = 0
+
+                if style != 'none' and size > 0:
+                    out_np = np.array(output.convert('RGBA'), dtype=np.uint8)
+                    max_border = min(out_np.shape[0], out_np.shape[1]) // 2
+                    size = max(0, min(size, max_border))
+
+                    if size > 0:
+                        if style == 'image':
+                            frame_np = border_cfg.get('frame_image_np')
+                            if frame_np is None and border_cfg.get('frame_image') is not None:
+                                frame_np = np.array(border_cfg['frame_image'].convert('RGBA'), dtype=np.uint8)
+                                border_cfg['frame_image_np'] = frame_np
+                            if frame_np is not None:
+                                out_np = apply_frame_border(out_np, border_size=size, style='image', frame_image=frame_np)
+                        else:
+                            out_np = apply_frame_border(out_np, border_size=size, style=style)
+
+                    output = Image.fromarray(out_np, mode='RGBA')
+    except Exception:
+        # Non-fatal: keep the composited overlay even if border re-apply fails.
+        pass
     return output
 
 

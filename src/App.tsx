@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { LatestCallCancelledError, PyWorkerClient, RpcError } from './py/client'
 import DyesPanel, { DyeInfo } from './components/DyesPanel'
 import DitherPanel from './components/DitherPanel'
@@ -9,7 +9,6 @@ import ImageInput from './components/ImageInput'
 import { ExternalPntEntry } from './components/ExternalLibraryPanel'
 import AdvancedPanel from './components/AdvancedPanel'
 import PreviewPane from './components/PreviewPane'
-import DebugPreviewDetails from './components/DebugPreviewDetails'
 import PerfHud, { PerfEventType, PerfReport } from './components/PerfHud'
 import IntroSplash from './components/IntroSplash'
 import { useI18n } from './i18n/I18nProvider'
@@ -92,6 +91,8 @@ type ExternalScanResult = {
 }
 
 type EngineBootstrapState = 'loading' | 'ready' | 'error'
+type GuiStyleId = 'reference' | 'studio' | 'compact' | 'kiosk'
+
 const DEFAULT_MAX_IMAGE_DIM = 4096
 const DEFAULT_PREVIEW_MAX_DIM = 1024
 const FAST_MAX_PIXELS = 350_000
@@ -157,6 +158,13 @@ function parseTemplateCategory(value: string | undefined): TemplateCategory {
   return 'all'
 }
 
+function parseGuiStyle(value: string | undefined): GuiStyleId {
+  if (value === 'reference' || value === 'studio' || value === 'compact' || value === 'kiosk') {
+    return value
+  }
+  return 'reference'
+}
+
 function sanitizeFileNamePart(value: string): string {
   return value
     .trim()
@@ -177,6 +185,8 @@ function App() {
     show_game_object: prefs.showGameObject ?? initialAppState.show_game_object
   })
   const [showAdvanced, setShowAdvanced] = useState(prefs.advancedOpen ?? false)
+  const [kioskControlsOpen, setKioskControlsOpen] = useState(false)
+  const [guiStyle, setGuiStyle] = useState<GuiStyleId>(parseGuiStyle(prefs.guiStyle))
   const [introDismissed, setIntroDismissed] = useState(prefs.introDismissed ?? false)
   const [introVisible, setIntroVisible] = useState(!introDismissed)
   const introHideTimerRef = useRef<number | null>(null)
@@ -220,6 +230,73 @@ function App() {
   const previewCacheRef = useRef<Map<string, string>>(new Map())
   const currentBlobUrlRef = useRef<string | null>(null)
   const pendingPreviewQualityRef = useRef<'fast' | 'final'>('final')
+  const templateRequestSeqRef = useRef(0)
+  const canvasRequestSeqRef = useRef(0)
+
+  const borderSizeMax = useMemo(() => {
+    const width = resolvedCanvas?.width ?? 0
+    const height = resolvedCanvas?.height ?? 0
+    if (width <= 0 || height <= 0) {
+      return 256
+    }
+
+    let effectiveWidth = width
+    let effectiveHeight = height
+
+    // Multi-canvas: border is applied per-tile, so cap based on tile size (not the combined preview).
+    if (canvasLayout?.kind === 'multi_canvas') {
+      const clampToRange = (value: number, range: { min: number; max: number; default: number }) => {
+        if (!Number.isFinite(value)) {
+          return range.default
+        }
+        const floored = Math.floor(value)
+        return Math.max(range.min, Math.min(range.max, floored))
+      }
+
+      const rows = clampToRange(state.canvas_request?.rows ?? canvasLayout.rows.default, canvasLayout.rows)
+      const cols = clampToRange(state.canvas_request?.cols ?? canvasLayout.cols.default, canvasLayout.cols)
+      if (rows > 0 && cols > 0) {
+        effectiveWidth = Math.max(1, Math.floor(width / cols))
+        effectiveHeight = Math.max(1, Math.floor(height / rows))
+      }
+    }
+
+    const halfMin = Math.floor(Math.min(effectiveWidth, effectiveHeight) / 2)
+    return Math.max(0, Math.min(256, halfMin))
+  }, [canvasLayout, resolvedCanvas?.height, resolvedCanvas?.width, state.canvas_request])
+
+  const multiCanvasGrid = useMemo(() => {
+    if (canvasLayout?.kind !== 'multi_canvas') {
+      return null
+    }
+
+    const clampToRange = (value: number, range: { min: number; max: number; default: number }) => {
+      if (!Number.isFinite(value)) {
+        return range.default
+      }
+      const floored = Math.floor(value)
+      return Math.max(range.min, Math.min(range.max, floored))
+    }
+
+    const requestedRows = state.canvas_request?.rows ?? canvasLayout.rows.default
+    const requestedCols = state.canvas_request?.cols ?? canvasLayout.cols.default
+    return {
+      rows: clampToRange(requestedRows, canvasLayout.rows),
+      cols: clampToRange(requestedCols, canvasLayout.cols)
+    }
+  }, [canvasLayout, state.canvas_request])
+
+  useEffect(() => {
+    if (state.border_config.size > borderSizeMax) {
+      dispatch({
+        type: 'setBorderConfig',
+        payload: {
+          ...state.border_config,
+          size: borderSizeMax
+        }
+      })
+    }
+  }, [borderSizeMax, state.border_config.size])
 
   useEffect(() => () => client.dispose(), [client])
 
@@ -327,6 +404,7 @@ function App() {
     const timeoutId = window.setTimeout(() => {
       savePrefs({
         lang: locale,
+        guiStyle,
         introDismissed,
         advancedOpen: showAdvanced,
         previewMode: state.preview_mode,
@@ -342,6 +420,7 @@ function App() {
       window.clearTimeout(timeoutId)
     }
   }, [
+    guiStyle,
     introDismissed,
     locale,
     maxImageDim,
@@ -440,7 +519,7 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client])
 
-  const statusLine = `${t('web.engine_status')}: ${engineStatus} · ${t('web.templates_loaded')}: ${templates.length} · ${t('panel.dyes')}: ${availableDyes.length}`
+  const statusLine = `Engine: ${engineStatus} · Templates: ${templates.length} · Dyes: ${availableDyes.length}`
 
   useEffect(() => {
     if (introHideTimerRef.current !== null) {
@@ -469,7 +548,12 @@ function App() {
 
 
   const handleSetTemplate = async (templateId: string) => {
+    const requestSeq = templateRequestSeqRef.current + 1
+    templateRequestSeqRef.current = requestSeq
+
     if (!templateId) {
+      client.cancelLatest('template-set')
+      client.cancelLatest('canvas-request')
       setResolvedCanvas(null)
       setCanvasLayout(null)
       dispatch({ type: 'setCanvasRequest', payload: null })
@@ -477,11 +561,18 @@ function App() {
       return
     }
 
+    // Changing templates invalidates any in-flight canvas request.
+    client.cancelLatest('canvas-request')
+
     setLoading(true)
     setResult('')
 
     try {
-      const response: SetTemplateResult = await client.call('pc.setTemplate', { templateId }, { timeoutMs: 60_000 })
+      const response: SetTemplateResult = await client.callLatest('pc.setTemplate', { templateId }, 'template-set', { timeoutMs: 60_000 })
+
+      if (requestSeq !== templateRequestSeqRef.current) {
+        return
+      }
 
       dispatch({ type: 'setSelectedTemplateId', payload: response.selected_template_id })
       setResolvedCanvas(response.canvas_resolved)
@@ -503,13 +594,23 @@ function App() {
       dispatch({ type: 'setCanvasRequest', payload: initialCanvasRequest })
 
       if (initialCanvasRequest) {
-        const canvasRequestResponse: SetCanvasRequestResult = await client.call('pc.setCanvasRequest', {
-          canvasRequest: initialCanvasRequest
-        }, {
-          timeoutMs: 60_000
-        })
-        setResolvedCanvas(canvasRequestResponse.canvas_resolved)
-        dispatch({ type: 'setCanvasRequest', payload: canvasRequestResponse.canvas_request })
+        try {
+          const canvasRequestResponse: SetCanvasRequestResult = await client.callLatest('pc.setCanvasRequest', {
+            canvasRequest: initialCanvasRequest
+          }, 'canvas-request', {
+            timeoutMs: 60_000
+          })
+          if (requestSeq !== templateRequestSeqRef.current) {
+            return
+          }
+          setResolvedCanvas(canvasRequestResponse.canvas_resolved)
+          dispatch({ type: 'setCanvasRequest', payload: canvasRequestResponse.canvas_request })
+        } catch (error) {
+          if (error instanceof LatestCallCancelledError) {
+            return
+          }
+          throw error
+        }
       }
 
       const paintAreaText = response.canvas_resolved.paint_area
@@ -520,13 +621,23 @@ function App() {
         `template=${response.selected_template_id}, width=${response.canvas_resolved.width}, height=${response.canvas_resolved.height}, paint_area=${paintAreaText}`
       )
     } catch (error) {
+      if (error instanceof LatestCallCancelledError) {
+        return
+      }
+
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+
       setResolvedCanvas(null)
       setCanvasLayout(null)
       dispatch({ type: 'setCanvasRequest', payload: null })
       dispatch({ type: 'setCanvasIsDynamic', payload: false })
       handleRpcError(error)
     } finally {
-      setLoading(false)
+      if (requestSeq === templateRequestSeqRef.current) {
+        setLoading(false)
+      }
     }
   }
 
@@ -626,6 +737,9 @@ function App() {
   }
 
   const handleCanvasRequestChange = async (nextRequest: CanvasRequest | null) => {
+    const requestSeq = canvasRequestSeqRef.current + 1
+    canvasRequestSeqRef.current = requestSeq
+
     dispatch({ type: 'setCanvasRequest', payload: nextRequest })
 
     if (!state.selected_template_id) {
@@ -636,19 +750,32 @@ function App() {
     setResult('')
 
     try {
-      const response: SetCanvasRequestResult = await client.call('pc.setCanvasRequest', {
+      const response: SetCanvasRequestResult = await client.callLatest('pc.setCanvasRequest', {
         canvasRequest: nextRequest
-      }, {
+      }, 'canvas-request', {
         timeoutMs: 60_000
       })
+
+      if (requestSeq !== canvasRequestSeqRef.current) {
+        return
+      }
 
       setResolvedCanvas(response.canvas_resolved)
       dispatch({ type: 'setCanvasRequest', payload: response.canvas_request })
       setResult(`canvas request updated: ${response.canvas_resolved.width}x${response.canvas_resolved.height}`)
     } catch (error) {
+      if (error instanceof LatestCallCancelledError) {
+        return
+      }
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+
       handleRpcError(error)
     } finally {
-      setLoading(false)
+      if (requestSeq === canvasRequestSeqRef.current) {
+        setLoading(false)
+      }
     }
   }
 
@@ -795,7 +922,7 @@ function App() {
     }
 
     try {
-      const response: ImageMeta = await runWithTiming(t('status.opening_image'), async () => {
+      const response: ImageMeta = await runWithTiming('Loading image…', async () => {
         return client.call(
           'pc.setImage',
           {
@@ -815,7 +942,7 @@ function App() {
     } catch (error) {
       const message = getErrorMessage(error)
       setImageInputError(message)
-      setImageInputWarning(t('web.warning_keep_previous_preview'))
+      setImageInputWarning('Keeping previous preview after image load error.')
       handleRpcError(error)
     }
   }
@@ -823,7 +950,7 @@ function App() {
   const handleGeneratePnt = async () => {
     const startedAt = performance.now()
     try {
-      const response: GeneratePntResult = await runWithTiming(t('status.generating_pnt'), async () => {
+      const response: GeneratePntResult = await runWithTiming('Generating .pnt…', async () => {
         await syncPcSettings(undefined, 'raster20')
         return client.call('pc.generatePnt', {
           settings: {
@@ -931,22 +1058,31 @@ function App() {
   }
 
   const previewDepsHash = useMemo(() => {
-    const previewSettingsSnapshot = buildPcSettings()
-    const enabledDyes = [...previewSettingsSnapshot.enabledDyes].sort((a, b) => a - b)
-
+    const enabledDyes = [...state.enabled_dyes].sort((a, b) => a - b)
     return stableStringify({
       templateId: state.selected_template_id,
       imageToken: imageVersion,
-      previewMaxDim,
-      settings: {
-        ...previewSettingsSnapshot,
-        enabledDyes
-      }
+      previewMode: state.preview_mode,
+      showGameObject: state.show_game_object,
+      dyes: {
+        useAllDyes,
+        enabledDyes,
+        bestColors
+      },
+      dither: {
+        mode: state.dithering_config.mode,
+        strength: state.dithering_config.strength
+      },
+      border: {
+        style: state.border_config.style,
+        size: state.border_config.size,
+        frame: state.border_config.frame_image
+      },
+      layout: state.canvas_request
     })
   }, [
     bestColors,
     imageVersion,
-    previewMaxDim,
     state.border_config.frame_image,
     state.border_config.size,
     state.border_config.style,
@@ -990,7 +1126,7 @@ function App() {
     }
 
     try {
-      const response: { enabledDyes: number[] } = await runWithTiming(t('status.calculating_best_dyes'), async () => {
+      const response: { enabledDyes: number[] } = await runWithTiming('Calculating best dyes…', async () => {
         await syncPcSettings()
         return client.call('pc.calculateBestColors', {
           n: bestColors,
@@ -1012,13 +1148,9 @@ function App() {
   const nonIntrusiveWarnings = [
     imageInputWarning,
     previewMaxDim >= HIGH_PREVIEW_WARNING_DIM
-      ? t('web.warning_high_preview_dim')
+      ? 'High preview resolution may be slower. Consider 1024 for smoother editing.'
       : null
   ].filter((message): message is string => Boolean(message))
-
-  const previewError = result.startsWith('RPC error:') || result.startsWith('Error:') || result.startsWith('Unknown error:')
-    ? result
-    : null
 
   const perfSummary = useMemo(() => {
     const grouped = perfEvents.reduce<Record<PerfEventType, number[]>>((acc, event) => {
@@ -1114,6 +1246,19 @@ function App() {
           </select>
         </label>
 
+        <label htmlFor="gui-style-selector">
+          {t('panel.gui_style')}
+          <select
+            id="gui-style-selector"
+            value={guiStyle}
+            onChange={(event) => setGuiStyle(parseGuiStyle(event.target.value))}
+          >
+            <option value="reference">{t('gui_style.reference')}</option>
+            <option value="studio">{t('gui_style.studio')}</option>
+            <option value="compact">{t('gui_style.compact')}</option>
+            <option value="kiosk">{t('gui_style.kiosk')}</option>
+          </select>
+        </label>
       </div>
     </header>
   )
@@ -1158,23 +1303,13 @@ function App() {
           diagnostics={(
             <div>
               <p className="status-line">{statusLine}</p>
-              <DebugPreviewDetails
-                busyTask={busyTask}
-                lastOpTimeMs={lastOpTimeMs}
-                result={result}
-                imageMeta={state.image_meta}
-                previewMeta={previewMeta}
-                resolvedCanvas={resolvedCanvas}
-                canvasIsDynamic={state.canvas_is_dynamic}
-                templatesCount={templates.length}
-              />
               <label>
                 <input
                   type="checkbox"
                   checked={showPerfHud}
                   onChange={(event) => setShowPerfHud(event.target.checked)}
                 />
-                {t('web.show_perf_hud')}
+                Show Perf HUD
               </label>
               {showPerfHud ? (
                 <PerfHud
@@ -1289,6 +1424,7 @@ function App() {
     <>
       <BorderPanel
         config={state.border_config}
+        maxSize={borderSizeMax}
         frameImages={availableFrameImages}
         disabled={loading}
         onChange={(value, options) => {
@@ -1308,19 +1444,45 @@ function App() {
     </>
   )
 
+  const renderControlStack = () => (
+    <>
+      {renderSourcePanels()}
+      {renderCanvasPanels()}
+      {renderPreviewModePanel()}
+      {renderDyesPanel()}
+      {renderBorderAndDither()}
+      {renderAdvancedSection()}
+      {renderGenerateButton()}
+    </>
+  )
+
   const renderPreviewPane = () => (
     <PreviewPane
+      busyTask={busyTask}
+      lastOpTimeMs={lastOpTimeMs}
+      result={result}
+      imageMeta={state.image_meta}
       isRenderingPreview={isRenderingPreview}
-      previewMode={state.preview_mode}
+      previewMeta={previewMeta}
       previewImageUrl={previewImageUrl}
       fastPreviewRgba={fastPreviewRgba}
+      resolvedCanvas={resolvedCanvas}
+      canvasIsDynamic={state.canvas_is_dynamic}
+      multiCanvasGrid={multiCanvasGrid}
+      templatesCount={templates.length}
       warnings={nonIntrusiveWarnings}
-      error={previewError}
     />
   )
 
+  const section = (label: string, content: ReactNode) => (
+    <details className="compact-section" open>
+      <summary>{label}</summary>
+      <div className="compact-section__body">{content}</div>
+    </details>
+  )
+
   return (
-    <main className="app-shell theme-studio">
+    <main className={`app-shell theme-${guiStyle} layout-${guiStyle}`}>
       <IntroSplash
         visible={introVisible}
         title={t('web.intro.title')}
@@ -1345,12 +1507,70 @@ function App() {
 
         {!ready ? <p>{t('web.loading_locales')}</p> : null}
 
-        <div className="studio-layout">
-          <div className="panel-card studio-left">{renderSourcePanels()}{renderCanvasPanels()}</div>
-          <div className="studio-center">{renderPreviewPane()}</div>
-          <div className="panel-card studio-right">{renderPreviewModePanel()}{renderDyesPanel()}{renderBorderAndDither()}</div>
-          <div className="panel-card studio-bottom">{renderAdvancedSection()}{renderGenerateButton()}</div>
-        </div>
+        {guiStyle === 'reference' ? (
+          <div className="workspace-layout">
+            <aside className="sidebar"><div className="panel-card">{renderControlStack()}</div></aside>
+            {renderPreviewPane()}
+          </div>
+        ) : null}
+
+        {guiStyle === 'studio' ? (
+          <div className="studio-layout">
+            <div className="panel-card studio-left">{renderSourcePanels()}{renderCanvasPanels()}</div>
+            <div className="studio-center">{renderPreviewPane()}</div>
+            <div className="panel-card studio-right">{renderPreviewModePanel()}{renderDyesPanel()}{renderBorderAndDither()}</div>
+            <div className="panel-card studio-bottom">{renderAdvancedSection()}{renderGenerateButton()}</div>
+          </div>
+        ) : null}
+
+        {guiStyle === 'compact' ? (
+          <div className="compact-layout">
+            <div className="compact-preview">{renderPreviewPane()}</div>
+            <div className="panel-card compact-controls">
+              {section(t('panel.image'), renderSourcePanels())}
+              {section(t('panel.canvas'), renderCanvasPanels())}
+              {section(t('panel.preview_mode'), renderPreviewModePanel())}
+              {section(t('panel.dyes'), renderDyesPanel())}
+              {section(t('panel.border'), <BorderPanel
+                config={state.border_config}
+                maxSize={borderSizeMax}
+                frameImages={availableFrameImages}
+                disabled={loading}
+                onChange={(value, options) => {
+                  pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
+                  dispatch({ type: 'setBorderConfig', payload: value })
+                }}
+              />)}
+              {section(t('panel.dithering'), <DitherPanel
+                config={state.dithering_config}
+                disabled={loading}
+                onChange={(value, options) => {
+                  pendingPreviewQualityRef.current = options?.previewQuality ?? 'final'
+                  dispatch({ type: 'setDitheringConfig', payload: value })
+                }}
+              />)}
+              {section(t('panel.advanced'), renderAdvancedSection())}
+              {renderGenerateButton()}
+            </div>
+          </div>
+        ) : null}
+
+        {guiStyle === 'kiosk' ? (
+          <div className="kiosk-layout">
+            <div className="kiosk-preview">{renderPreviewPane()}</div>
+            <button
+              className="kiosk-controls-toggle"
+              type="button"
+              onClick={() => setKioskControlsOpen((value) => !value)}
+              aria-expanded={kioskControlsOpen}
+            >
+              Controls
+            </button>
+            <aside className={`kiosk-controls ${kioskControlsOpen ? 'is-open' : ''}`}>
+              <div className="panel-card">{renderControlStack()}</div>
+            </aside>
+          </div>
+        ) : null}
       </section>
     </main>
   )

@@ -11,21 +11,23 @@ export type BorderConfig = {
 
 type BorderPanelProps = {
   config: BorderConfig
+  maxSize?: number
   frameImages: string[]
   disabled?: boolean
   onChange: (value: BorderConfig, options?: { previewQuality: 'fast' | 'final' }) => void
 }
 
-function clampSize(value: number): number {
+function clampSize(value: number, maxSize: number): number {
   if (!Number.isFinite(value)) {
     return 0
   }
-  return Math.max(0, Math.min(512, Math.floor(value)))
+  return Math.max(0, Math.min(maxSize, Math.floor(value)))
 }
 
-export function BorderPanel({ config, frameImages, disabled = false, onChange }: BorderPanelProps) {
+export function BorderPanel({ config, maxSize = 256, frameImages, disabled = false, onChange }: BorderPanelProps) {
   const { t } = useI18n()
-  const normalizedSize = clampSize(config.size)
+  const normalizedMaxSize = Number.isFinite(maxSize) ? Math.max(0, Math.floor(maxSize)) : 256
+  const normalizedSize = clampSize(config.size, normalizedMaxSize)
   const slider = useSliderCommit(normalizedSize, {
     throttleMs: 200,
     idleFinalMs: 650,
@@ -33,7 +35,7 @@ export function BorderPanel({ config, frameImages, disabled = false, onChange }:
       onChange(
         {
           style: config.style,
-          size: clampSize(value),
+          size: clampSize(value, normalizedMaxSize),
           frame_image: config.frame_image
         },
         { previewQuality: 'fast' }
@@ -43,7 +45,7 @@ export function BorderPanel({ config, frameImages, disabled = false, onChange }:
       onChange(
         {
           style: config.style,
-          size: clampSize(value),
+          size: clampSize(value, normalizedMaxSize),
           frame_image: config.frame_image
         },
         { previewQuality: 'final' }
@@ -82,7 +84,7 @@ export function BorderPanel({ config, frameImages, disabled = false, onChange }:
             <input
               type="range"
               min={0}
-              max={256}
+              max={normalizedMaxSize}
               step={1}
               value={slider.value}
               aria-label={t('web.aria.border_size')}
