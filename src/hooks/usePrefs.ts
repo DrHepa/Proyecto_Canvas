@@ -2,6 +2,7 @@ export type Prefs = {
   lang?: string
   introDismissed?: boolean
   advancedOpen?: boolean
+  guiStyle?: string
   previewMode?: 'visual' | 'ark_simulation'
   showGameObject?: boolean
   previewMaxDim?: number

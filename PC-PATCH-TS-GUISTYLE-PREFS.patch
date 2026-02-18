@@ -1,0 +1,15 @@
+diff --git a/src/hooks/usePrefs.ts b/src/hooks/usePrefs.ts
+--- a/src/hooks/usePrefs.ts
++++ b/src/hooks/usePrefs.ts
+@@
+ export type Prefs = {
+   lang?: string
+   advancedOpen?: boolean
++  guiStyle?: string
+   previewMode?: 'visual' | 'ark_simulation'
+   showGameObject?: boolean
+   previewMaxDim?: number
+   maxImageDim?: number
+   lastCanvasCategory?: string
+   lastTemplateId?: string
+ }
