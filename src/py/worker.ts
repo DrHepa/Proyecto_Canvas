@@ -588,15 +588,19 @@ _pc_preview_bytes
     const rawPayload = (params as { payload?: unknown } | undefined)?.payload
     const payload = asRenderPreview2Payload(rawPayload)
 
-    pyodide.globals.set('__pc_preview2_payload', payload)
+    // NOTE: Do NOT pass the payload through a shared pyodide.globals key.
+    // Multiple preview RPC calls can overlap (React updates / throttled drags),
+    // and using a single shared global leads to KeyError races.
+    // Instead, embed the payload as JSON and parse inside Python.
+    const safePayload = JSON.stringify(payload)
 
-    try {
-      const result = await runPythonObject(pyodide, `
-import sys
+    const result = await runPythonObject(pyodide, `
+import json, sys
 if '/assets/py_runtime' not in sys.path:
     sys.path.insert(0, '/assets/py_runtime')
 from pc_web_entry import render_preview2
-render_preview2(__pc_preview2_payload)
+_pc_payload = json.loads(${JSON.stringify(safePayload)})
+render_preview2(_pc_payload)
 `) as { kind?: unknown; png?: unknown; rgba?: unknown; w?: unknown; h?: unknown }
 
       const kind = result?.kind
@@ -625,9 +629,6 @@ render_preview2(__pc_preview2_payload)
       }
 
       throw new Error('pc.renderPreview2 returned unknown payload kind')
-    } finally {
-      pyodide.globals.delete('__pc_preview2_payload')
-    }
   },
   'pc.generatePnt': async (params) => {
     const pyodide = await initPyodide()
