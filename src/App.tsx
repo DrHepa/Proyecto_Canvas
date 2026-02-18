@@ -931,31 +931,22 @@ function App() {
   }
 
   const previewDepsHash = useMemo(() => {
-    const enabledDyes = [...state.enabled_dyes].sort((a, b) => a - b)
+    const previewSettingsSnapshot = buildPcSettings()
+    const enabledDyes = [...previewSettingsSnapshot.enabledDyes].sort((a, b) => a - b)
+
     return stableStringify({
       templateId: state.selected_template_id,
       imageToken: imageVersion,
-      previewMode: state.preview_mode,
-      showGameObject: state.show_game_object,
-      dyes: {
-        useAllDyes,
-        enabledDyes,
-        bestColors
-      },
-      dither: {
-        mode: state.dithering_config.mode,
-        strength: state.dithering_config.strength
-      },
-      border: {
-        style: state.border_config.style,
-        size: state.border_config.size,
-        frame: state.border_config.frame_image
-      },
-      layout: state.canvas_request
+      previewMaxDim,
+      settings: {
+        ...previewSettingsSnapshot,
+        enabledDyes
+      }
     })
   }, [
     bestColors,
     imageVersion,
+    previewMaxDim,
     state.border_config.frame_image,
     state.border_config.size,
     state.border_config.style,
